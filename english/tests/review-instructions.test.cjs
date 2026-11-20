@@ -1,0 +1,60 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const C=require('../js/daily/course'),L=require('../js/daily/learning'),{Engine}=require('../js/daily/engine');
+const intro=()=>({id:'diagnostic-intro',kind:'open',prompt:'Explain the earlier idea in your own words. Give your own example or limitation.',answer:'I work on… My role is… I am responsible for…',context:'I work on… My role is… I am responsible for…',explanation:'A sample introduction.'});
+const clarification=()=>({id:'diagnostic-question',kind:'open',prompt:'Explain the earlier idea in your own words. Give your own example or limitation.',answer:'Could you explain how it works? Could you give me an example?',context:'Could you explain how it works?',explanation:'Ask a question.'});
+function savedSession(){const data={};const storage={getItem:k=>data[k]||null,setItem:(k,v)=>{data[k]=v;}};const e=new Engine(storage);const s=e.start();s.reviews=[intro(),clarification()];s.answers['review-0']='I am a university student. I am learning programming.';s.answers['review-1']='Could you explain how it works? Could you give me an example?';s.activeMs=12345;s.blockIndex=0;s.lesson.learningLanguageVersion=4;s.results['review-0']={correct:true,assisted:false,at:new Date().toISOString()};e.save();return {e,s,storage};}
+test('old introduction scaffold becomes an introduction task, not a concept explanation',()=>{
+  const item=L.openReview(intro());assert.equal(item.reviewIntent,'introduction');assert.match(item.prompt,/Introduce yourself/);assert.match(item.context,/student/);assert.match(item.context,/company or job is not required/);assert.match(item.instruction,/not facts about you/);assert.equal(item.answerLabel,'Your short introduction');assert.doesNotMatch(item.prompt,/earlier idea|limitation/);
+});
+test('clarification practice asks the learner to ask a question, not explain the sample question',()=>{
+  const item=L.openReview(clarification());assert.equal(item.reviewIntent,'clarification');assert.match(item.prompt,/one or two questions/);assert.match(item.instruction,/do not need to explain the concept/);assert.equal(item.answerLabel,'Your questions to the teammate');assert.notEqual(item.context,item.answer);
+});
+test('vocabulary, wording and concept prompts retain distinct purposes across repeated refreshes',()=>{
+  for(const item of [{id:'word-task',kind:'vocabulary',answer:'pipeline',prompt:'Recall pipeline',explanation:'A series of checks.'},{id:'fix-task',kind:'grammar',answer:'She works',prompt:'Replace the incorrect wording: She work',explanation:'Subject agreement.'},{id:'transfer-task',kind:'transfer',answer:'An API is a contract between systems.',prompt:'Explain an API to a new colleague.',explanation:'An API explanation.'}]){
+    const task=L.openReview(item);assert.deepEqual(L.openReview(task),task);assert.ok(task.instruction);assert.ok(task.answerLabel);assert.doesNotMatch(task.prompt,/earlier idea/);
+  }
+});
+test('already upgraded active lessons receive the instruction fix without losing answers or time',()=>{
+  const {e,s,storage}=savedSession(),answers={...s.answers},lesson=JSON.stringify(s.lesson);
+  const restored=new Engine(storage).current();assert.equal(restored.id,s.id);assert.equal(restored.activeMs,12345);assert.deepEqual(restored.answers,answers);assert.equal(JSON.stringify(restored.lesson),lesson);assert.equal(restored.reviews[0].reviewIntent,'introduction');assert.equal(restored.reviews[1].reviewIntent,'clarification');assert.equal(restored.results['review-0'],undefined);assert.equal(L.refreshSession(restored),false);assert.equal(e.state.sessions.length,0);
+});
+test('AI receives the same specific instructions as the learner',()=>{
+  const {s}=savedSession();L.refreshSession(s);const items=L.areaItems(s,'review');assert.match(items[0].task,/company or job is not required/);assert.match(items[0].task,/not facts about you/);assert.match(items[1].task,/do not need to explain the concept/);assert.equal(L.assessmentBundle(s,'review').answers[1].text,s.answers['review-1']);
+});
+test('browser review renderer displays specific instructions and field labels',()=>{
+  const {s}=savedSession();L.refreshSession(s);const scope={};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../js/daily/recall-block.js'),'utf8'),scope);const html=scope.RecallEnglishBlock.renderLessonBlock({lesson:s.lesson,attempt:s,exitQuestions:[]},'');assert.match(html,/Your short introduction/);assert.match(html,/Your questions to the teammate/);assert.match(html,/company or job is not required/);assert.match(html,/not facts about you/);assert.doesNotMatch(html,/Recall the idea|Your own explanation and example|Explain the earlier idea/);
+});
+test('word cards ask for one sentence and clearly label the definition as a hint',()=>{
+  const task=L.openReview({id:'word-project',kind:'open',answer:'project',prompt:'Use project and show what it means.',explanation:'Our project helps students learn English.'});assert.equal(task.prompt,'Write ONE sentence using “project”.');assert.equal(task.contextLabel,'Word meaning — hint');assert.equal(task.responseLength,'1 sentence');assert.equal(task.answerLabel,'Your sentence with “project”');assert.match(task.instruction,/do not need to explain the definition/);
+});
+test('clarifying a version-2 task retains its existing answer and valid assessment',()=>{
+  const {s}=savedSession();L.refreshSession(s);s.reviews.forEach(r=>r.reviewTaskVersion=2);const report={passed:true,snapshot:'saved assessment'};s.aiAssessments={review:report};s.results['review-0']={correct:true,assisted:false};const answers={...s.answers};assert.equal(L.refreshSession(s),true);assert.deepEqual(s.answers,answers);assert.equal(s.aiAssessments.review,report);assert.equal(s.results['review-0'].correct,true);
+});
+test('duplicate concepts and words merge, while later answer keys and all original drafts survive',()=>{
+  const {s}=savedSession();
+  const concept={kind:'open',prompt:'Explain the earlier idea in your own words. Give your own example or limitation.',context:'A project solves a problem for a particular group of people.',explanation:'An example.'};
+  s.reviews=[intro(),clarification(),{id:'practice-project',kind:'open',answer:'project',prompt:'Use project.',explanation:'An example.'},{...concept,id:'transfer-daily-001',answer:concept.context+' More details about the situation.'},{...concept,id:'warmup-daily-001',answer:concept.context},{id:'word-build',kind:'open',answer:'build',prompt:'Use build.',explanation:'An example.'},{id:'word-feature',kind:'open',answer:'feature',prompt:'Use feature.',explanation:'An example.'},{id:'word-project',kind:'open',answer:'project',prompt:'Use project.',explanation:'An example.'}];
+  for(let i=0;i<8;i++)s.answers['review-'+i]=i===6||i===7?'':'My saved draft '+i;
+  s.answers.writing='Keep my writing too.';s.results['review-5']={correct:false,assisted:true};s.attempts=[{key:'review-5',correct:false,assisted:true,at:'2026-11-16'}];
+  assert.equal(L.refreshSession(s),true);assert.equal(s.reviews.length,6);assert.equal(new Set(s.reviews.map(L.reviewIdentity)).size,6);assert.equal(s.answers['review-3'],'My saved draft 3');assert.equal(s.answers['review-4'],'My saved draft 5');assert.equal(s.answers['review-5'],'');assert.equal(s.answers.writing,'Keep my writing too.');assert.equal(s.attempts[0].key,'review-4');assert.equal(s.attempts[0].reviewSourceId,'word-build');assert.equal(s.reviewMergeArchive[0].answers['review-4'],'My saved draft 4');assert.deepEqual(s.reviews[2].reviewSourceIds,['practice-project','word-project']);assert.deepEqual(s.reviews[3].reviewSourceIds,['transfer-daily-001','warmup-daily-001']);assert.equal(L.refreshSession(s),false);
+});
+test('merging prefers a completed draft over a blank duplicate',()=>{
+  const {s}=savedSession();s.reviews=[{id:'first-project',kind:'open',answer:'project',prompt:'Use project.',explanation:'Example.'},{id:'second-project',kind:'open',answer:'project',prompt:'Use project.',explanation:'Example.'}];s.answers={'review-0':'','review-1':'My project helps students.'};s.results={'review-1':{correct:true,assisted:false}};L.refreshSession(s);assert.equal(s.reviews.length,1);assert.equal(s.answers['review-0'],'My project helps students.');assert.equal(s.reviewMergeArchive[0].answers['review-1'],'My project helps students.');
+});
+test('the review limit applies after removing duplicates',()=>{
+  const {selectReviews}=require('../js/daily/engine');const items={};for(let i=0;i<6;i++)items['project-'+i]={id:'project-'+i,kind:'open',answer:'project',prompt:'Use project.',explanation:'Example.',dueDay:'2026-11-15',unresolved:false};for(const word of ['feature','build','team','user','role','developer','tester'])items[word]={id:word,kind:'vocabulary',answer:word,prompt:'Use '+word,explanation:'Example.',dueDay:'2026-11-15',unresolved:false};const selected=selectReviews({reviews:items},'2026-11-16');assert.equal(selected.length,8);assert.equal(selected.filter(r=>r.answer==='project').length,1);
+});
+test('a previous-task review includes its actual task, source text and saved learner answer',()=>{
+  const {s}=savedSession(),earlier=C.lessons[0];s.lesson=structuredClone(C.lessons[1]);s.lessonId=s.lesson.id;s.reviews=[{id:'transfer-'+earlier.id,kind:'open',prompt:'Explain the earlier idea in your own words. Give your own example or limitation.',context:earlier.concept.explanation,answer:earlier.speaking.model,explanation:'Earlier idea.'}];const history=[{lessonId:earlier.id,lesson:earlier,answers:{monologue:'My earlier explanation about a booking app.'}}];L.refreshSession(s,history,C.lessons);const reference=s.reviews[0].sourceReference;assert.equal(reference.title,earlier.title);assert.equal(reference.task,earlier.speaking.prompt);assert.equal(reference.text,earlier.reading.text);assert.equal(reference.answer,history[0].answers.monologue);assert.equal(reference.kind,'earlier-work');assert.deepEqual(L.areaItems(s,'review')[0].reference,reference);
+});
+test('mixed review grading does not substitute the current topic for an introduction',()=>{
+  const P=require('../english-ai-prompts.cjs'),{s}=savedSession();L.refreshSession(s);const bundle=P.context(C.lessons[1],'review',L.assessmentBundle(s,'review').answers);assert.deepEqual(bundle.sourceFacts,[]);assert.deepEqual(bundle.vocabulary,[]);assert.equal(bundle.grammarFocus,undefined);assert.equal(bundle.answers[0].intent,'introduction');assert.equal(bundle.answers[1].intent,'clarification');assert.match(P.gradePrompt(bundle).system,/student introduction is ON TASK/);assert.match(P.gradePrompt(bundle).system,/do not demand a dictionary definition/);
+});
+test('50 can pass, but the task must also be fulfilled and every answer must pass',()=>{
+  const P=require('../english-ai-prompts.cjs'),{s}=savedSession();L.refreshSession(s);const bundle=P.context(s.lesson,'review',L.assessmentBundle(s,'review').answers);const rows=bundle.answers.map(a=>({key:a.key,relevance:'on_task',scores:{task:3,grammar:1,vocabulary:2,clarity:2,coherence:2},summary:'A short answer.',strengths:[],corrections:[],nextStep:'Keep practising.'}));const pass=P.validateGrade({answers:rows},bundle);assert.equal(pass.score,50);assert.equal(pass.passed,true);rows[1].scores={task:2,grammar:2,vocabulary:2,clarity:2,coherence:2};const blocked=P.validateGrade({answers:rows},bundle);assert.equal(blocked.score,50);assert.equal(blocked.answers[0].passed,true);assert.equal(blocked.answers[1].passed,false);assert.equal(blocked.passed,false);
+});
+test('vocabulary rubric separates fulfilling the word-use task from grammar and optional style',()=>{
+  const P=require('../english-ai-prompts.cjs'),prompt=P.gradePrompt(P.context(C.lessons[0],'vocabulary',[])).system;assert.match(prompt,/task=4 even when articles, possessives or agreement need correction/);assert.match(prompt,/Inflected forms, including plurals, are valid/);assert.match(prompt,/do not automatically lower task, clarity and coherence again/);assert.match(prompt,/length alone is not a reason to lower coherence/);
+});

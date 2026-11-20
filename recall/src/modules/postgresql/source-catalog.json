@@ -1,0 +1,214 @@
+[
+  {
+    "title": "Meet your database",
+    "module": 0
+  },
+  {
+    "title": "Choose your columns",
+    "module": 0
+  },
+  {
+    "title": "Names and calculations",
+    "module": 0
+  },
+  {
+    "title": "A repeatable first report",
+    "module": 0
+  },
+  {
+    "title": "Keep matching rows",
+    "module": 1
+  },
+  {
+    "title": "Combine conditions",
+    "module": 1
+  },
+  {
+    "title": "Lists and ranges",
+    "module": 1
+  },
+  {
+    "title": "Search text",
+    "module": 1
+  },
+  {
+    "title": "Missing is not zero",
+    "module": 1
+  },
+  {
+    "title": "Top results and unique values",
+    "module": 1
+  },
+  {
+    "title": "Count and total",
+    "module": 2
+  },
+  {
+    "title": "One result per group",
+    "module": 2
+  },
+  {
+    "title": "Filter groups with HAVING",
+    "module": 2
+  },
+  {
+    "title": "Conditional reports",
+    "module": 2
+  },
+  {
+    "title": "Keys connect tables",
+    "module": 3
+  },
+  {
+    "title": "Keep unmatched rows",
+    "module": 3
+  },
+  {
+    "title": "Many-to-many relationships",
+    "module": 3
+  },
+  {
+    "title": "Avoid double counting",
+    "module": 3
+  },
+  {
+    "title": "Design your first table",
+    "module": 4
+  },
+  {
+    "title": "Insert new rows",
+    "module": 4
+  },
+  {
+    "title": "Update precisely",
+    "module": 4
+  },
+  {
+    "title": "Delete with care",
+    "module": 4
+  },
+  {
+    "title": "Constraints and upserts",
+    "module": 4
+  },
+  {
+    "title": "A query inside a query",
+    "module": 5
+  },
+  {
+    "title": "Check whether a match exists",
+    "module": 5
+  },
+  {
+    "title": "Name a step with WITH",
+    "module": 5
+  },
+  {
+    "title": "Rank without collapsing rows",
+    "module": 5
+  },
+  {
+    "title": "Running totals",
+    "module": 5
+  },
+  {
+    "title": "Dates and monthly reports",
+    "module": 6
+  },
+  {
+    "title": "Text and type conversions",
+    "module": 6
+  },
+  {
+    "title": "Query JSONB",
+    "module": 6
+  },
+  {
+    "title": "Arrays and membership",
+    "module": 6
+  },
+  {
+    "title": "Indexes and query plans",
+    "module": 6
+  },
+  {
+    "title": "All or nothing",
+    "module": 7
+  },
+  {
+    "title": "Reusable views",
+    "module": 7
+  },
+  {
+    "title": "Capstone: customer value",
+    "module": 7
+  },
+  {
+    "title": "Capstone: product performance",
+    "module": 7
+  },
+  {
+    "title": "Find customers to contact",
+    "module": 8
+  },
+  {
+    "title": "Map reachable cities",
+    "module": 8
+  },
+  {
+    "title": "Build the budget shelf",
+    "module": 8
+  },
+  {
+    "title": "Pick two featured products",
+    "module": 8
+  },
+  {
+    "title": "Take stock of the catalog",
+    "module": 9
+  },
+  {
+    "title": "Value the accessories shelf",
+    "module": 9
+  },
+  {
+    "title": "Summarize every department",
+    "module": 9
+  },
+  {
+    "title": "Choose promotion departments",
+    "module": 9
+  },
+  {
+    "title": "What NoSQL means",
+    "module": 10
+  },
+  {
+    "title": "Design a document",
+    "module": 10
+  },
+  {
+    "title": "Key-value and caching",
+    "module": 10
+  },
+  {
+    "title": "Graph relationships",
+    "module": 10
+  },
+  {
+    "title": "Wide-column workloads",
+    "module": 10
+  },
+  {
+    "title": "Consistency and copies",
+    "module": 10
+  },
+  {
+    "title": "Choose an architecture",
+    "module": 10
+  },
+  {
+    "title": "Support desk: daily handoff",
+    "module": 11
+  }
+]

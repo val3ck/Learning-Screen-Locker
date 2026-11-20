@@ -1,0 +1,58 @@
+## Паролі (`argon2`), Access JWT і Refresh у `HttpOnly` Cookie
+
+Сучасна схема автентифікації для Node.js API виглядає так:
+1. **Паролі ніколи не хешують через `SHA-256` чи самописні обгортки** — використовують **`argon2`** (`argon2id`) або `bcrypt`, де сіль генерується автоматично на кожного користувача.
+2. **Access Token (JWT через `jose`, TTL 5–15 хв)** — короткоживучий токен у заголовку `Authorization: Bearer ...` або `HttpOnly` cookie.
+3. **Refresh Token (випадковий рядок, TTL 7–30 днів)** — хеш зберігається в БД/Redis, а сам токен їде в **`HttpOnly; Secure; SameSite=Lax` cookie**. При оновленні (`POST /auth/refresh`) старий refresh видаляється і видається новий (**rotation**): якщо вкрадений refresh використали вдруге, сервер це бачить і блокує сесію.
+
+```ts
+import argon2 from 'argon2';
+import helmet from 'helmet';
+
+// 1. Безпечні HTTP-заголовки та CORS (ніколи '*' разом із credentials: true!)
+app.use(helmet());
+app.enableCors({
+  origin: ['https://app.example.com', 'http://localhost:5173'],
+  credentials: true,
+});
+
+// 2. Паролі в реальному проєкті
+const passwordHash = await argon2.hash(rawPassword, { type: argon2.argon2id });
+const isMatch = await argon2.verify(passwordHash, candidatePassword);
+
+// 3. Безпечна cookie для refresh / session ID
+response.cookie('rt', refreshToken, {
+  httpOnly: true,   // JS у браузері не прочитає (захист від викрадення при XSS)
+  secure: true,     // лише HTTPS у production
+  sameSite: 'lax',  // базовий захист від CSRF для сторонніх POST-форм
+  path: '/auth/refresh',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+});
+```
+
+## Чому `jose` і чим небезпечний самоперевірений JWT
+
+Base64-декодування payload (`JSON.parse(atob(token.split('.')[1]))`) **нічого не доводить**. На співбесідах часто питають класичні атаки на JWT:
+- **`alg: none` або підміна `RS256` → `HS256`:** завжди жорстко передавай `algorithms: ['HS256']` (або `['EdDSA']`) у `jwtVerify`, а не бери алгоритм із заголовка самого токена.
+- **Відкликання (`jti` revocation):** JWT є stateless, тому після `logout` чи блокування акаунта старий access-токен доживе до `exp`, якщо не перевіряти його `jti` (JWT ID) у короткому списку відкликаних ключів у **Redis** (із TTL рівним залишку `exp`).
+
+```ts
+import { SignJWT, jwtVerify } from 'jose';
+
+const key = new TextEncoder().encode(process.env.JWT_SECRET);
+const token = await new SignJWT({ roles: ['user'] })
+  .setProtectedHeader({ alg: 'HS256' })
+  .setSubject(user.id)
+  .setIssuer('booking-api')
+  .setJti(crypto.randomUUID())
+  .setIssuedAt()
+  .setExpirationTime('15m')
+  .sign(key);
+
+const { payload } = await jwtVerify(token, key, {
+  issuer: 'booking-api',
+  algorithms: ['HS256'],
+});
+```
+
+У лабораторній ти напишеш реальний `createTokenService` на пакеті `jose`, перевіриш підпис, час життя `exp`, відсікання підроблених `alg: none` токенів і миттєве відкликання через `jti`.

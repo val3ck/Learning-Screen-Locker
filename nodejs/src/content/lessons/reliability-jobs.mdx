@@ -1,0 +1,50 @@
+## Фонові задачі: BullMQ (Redis) та бізнес-ідемпотентність
+
+API не повинен тримати HTTP-відповідь 5 секунд, поки генерується PDF, відправляється лист чи працює парсер. Замість цього маршрут кладе задачу в чергу (**BullMQ** поверх Redis), одразу повертає `202 Accepted`, а окремий воркер виконує роботу асинхронно.
+
+```ts
+import { Queue, Worker } from 'bullmq';
+
+const connection = { url: process.env.REDIS_URL };
+export const paymentQueue = new Queue('payments', { connection });
+
+// 1. Producer (HTTP API): стабільний jobId захищає від дубля в черзі на моменті постановки
+await paymentQueue.add(
+  'send-receipt',
+  { paymentId, userId },
+  {
+    jobId: `receipt:${paymentId}`,
+    attempts: 3, // усього 3 спроби (1 початкова + 2 повтори)
+    backoff: { type: 'exponential', delay: 1000 }, // 1s -> 2s -> 4s
+    removeOnComplete: 500,
+    removeOnFail: false, // залишаємо в failed (DLQ) для розбору!
+  },
+);
+
+// 2. Worker: обробляє повторну доставку безпечно через БД-транзакцію
+new Worker(
+  'payments',
+  async (job) => {
+    await db.transaction(async (tx) => {
+      // Якщо запис із цим UNIQUE payment_id уже є — повторна доставка нічого не спише вдруге
+      const inserted = await tx.insertReceiptIfAbsent(job.data.paymentId);
+      if (!inserted) return;
+      await tx.markOrderPaid(job.data.paymentId);
+    });
+  },
+  { connection, concurrency: 5 },
+);
+```
+
+## Рівень Strong Junior → Mid: Transactional Outbox
+
+А що якщо сервер зробив `COMMIT` у PostgreSQL, і рівно за мілісекунду до `queue.add(...)` впав Redis або зникло живлення? Оплата в базі є, а лист чи задача в чергу так і не пішли!
+
+Промислове рішення — **Transactional Outbox**:
+1. У **тій самій PostgreSQL-транзакції**, де створюється замовлення/оплата, записується рядок у таблицю `outbox_events (id, type, payload, status, created_at)`.
+2. Окремий легкий процес або cron раз на секунду читає `WHERE status = 'pending' FOR UPDATE SKIP LOCKED`, публікує в BullMQ/RabbitMQ і позначає `sent`.
+3. Тоді база і черга **ніколи не роз’їдуться**.
+
+Крім того, розрізняй помилки в `Worker`: при `UnrecoverableError` (битий email, 400 від партнера) не треба робити ще 3 безглузді retry — одразу відправляй у failed / dead-letter.
+
+У лабораторній ти змоделюєш `createJobProcessor`: паралельну серіалізацію в межах одного процесу, виявлення конфлікту payload під тим самим `id` та повтор після тимчасового збою.

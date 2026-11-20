@@ -1,0 +1,72 @@
+{
+  "name": "sql-recall",
+  "version": "1.11.0",
+  "private": true,
+  "description": "Локальне щоденне повторення вивчених технологій",
+  "author": "SQL Recall",
+  "type": "module",
+  "main": "dist-main/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/sync-english-content.mjs && npm run typecheck && vite build && node scripts/build-main.mjs",
+    "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test:content": "tsx --test tests/content.test.ts",
+    "start": "electron .",
+    "demo": "electron . --demo",
+    "package": "npm run build && electron-builder --win dir",
+    "test:ui": "node scripts/ui-test.mjs",
+    "test:desktop": "node scripts/smoke-desktop.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.3.14",
+    "sql-formatter": "^15.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "^45.3.1",
+    "electron-builder": "^26.0.0",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.56.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  },
+  "build": {
+    "appId": "ua.local.sqlrecall",
+    "productName": "SQL Recall",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-main/**/*",
+      "integration/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/runtime.json",
+        "to": "runtime.json"
+      },
+      {
+        "from": "resources/english-checker",
+        "to": "english-checker",
+        "filter": [
+          "jre/**/*",
+          "languagetool/**/*",
+          "server.properties",
+          "service-worker.cjs",
+          "manifest.json",
+          "!**/hs_err_pid*.log",
+          "!**/replay_pid*.log"
+        ]
+      }
+    ],
+    "win": {
+      "target": "dir",
+      "signAndEditExecutable": false
+    },
+    "asar": true
+  }
+}

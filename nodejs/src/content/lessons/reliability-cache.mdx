@@ -1,0 +1,40 @@
+## Redis Cache-Aside і типові пастки під навантаженням
+
+Джерело істини — PostgreSQL; Redis лише прискорює гарячі читання з допустимою затримкою свіжості. Класичний патерн **cache-aside**:
+
+```ts
+import Redis from 'ioredis';
+
+const redis = new Redis(process.env.REDIS_URL);
+
+export async function getProductCached(tenantId: string, productId: string) {
+  const key = `v1:tenant:${tenantId}:product:${productId}`;
+
+  // 1. Fail-open: якщо Redis тимчасово лежить, не кладемо весь API, а йдемо в БД
+  try {
+    const cached = await redis.get(key);
+    if (cached !== null) {
+      return cached === '__NULL__' ? null : JSON.parse(cached);
+    }
+  } catch (err) {
+    console.warn('Redis read failed, falling back to DB', err);
+  }
+
+  const product = await prisma.product.findFirst({ where: { id: productId, tenantId } });
+
+  // 2. Negative caching: навіть null кешуємо на 10 сек, щоб боти не пробивали БД неіснуючими ID
+  const payload = product ? JSON.stringify(product) : '__NULL__';
+  const ttlSeconds = product ? 60 : 10;
+  await redis.set(key, payload, 'EX', ttlSeconds).catch(() => {});
+
+  return product;
+}
+```
+
+## Три проблеми, про які питають на Mid-рівні
+
+1. **Tenant leak через неповний ключ:** якщо ключ `product:42` без `tenantId` чи `locale`, користувач іншої компанії або іншої мови отримає чужий закешований JSON. Завжди включай усі параметри, від яких залежить відповідь, і версію схеми (`v1:...`).
+2. **Cache Stampede («ефект натовпу»):** якщо популярний ключ протух і прилетіло 500 одночасних запитів, усі 500 вдарять у PostgreSQL. Рішення: **single-flight** (один активний `Promise` на процес або розподілений lock / jitter до TTL `60 + random(0..10)` секунд).
+3. **Гонка `invalidate` та повільного `read`:** поки запит A читав старе значення з репліки, запит B оновив БД і видалив ключ у Redis, а потім А дописав застарілі дані назад у кеш. У локальній лабораторній це вирішує лічильник покоління (`version`); у розподіленому проді ставлять короткий TTL + версіонування або оновлення кешу з події `outbox`.
+
+У лабораторній ти реалізуєш локальний single-flight кеш із `null`-кешуванням, фесінгом поколінь після `invalidate` і захистом від кешування тимчасових помилок.

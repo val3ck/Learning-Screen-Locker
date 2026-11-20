@@ -1,0 +1,63 @@
+## Multi-stage `Dockerfile` + `docker-compose.yml` для всього стеку
+
+У продакшені і на співбесіді недостатньо просто запустити `node index.js` на своїй машині. Репозиторій має підніматись однією командою, логувати в JSON без секретів і проходити автоматичні перевірки на кожен Pull Request.
+
+```dockerfile
+# Multi-stage: devDependencies (TypeScript, @types) не потрапляють у фінальний образ
+FROM node:24-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:24-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/dist ./dist
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=3s CMD node -e "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "dist/main.js"]
+```
+
+```yaml
+# docker-compose.yml — API, PostgreSQL і Redis із правильним порядком старту
+services:
+  api:
+    build: .
+    ports: ["3000:3000"]
+    environment:
+      PORT: "3000"
+      DATABASE_URL: postgres://app:secret@postgres:5432/app
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+  postgres:
+    image: postgres:17-alpine
+    environment: { POSTGRES_USER: app, POSTGRES_PASSWORD: secret, POSTGRES_DB: app }
+    volumes: [pg_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      retries: 5
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+volumes:
+  pg_data:
+```
+
+## Структуровані логи (`pino`) і GitHub Actions CI
+
+- **`pino` замість сирого `console.log('error', err)`:** логи мають бути однорядковим JSON з полями `requestId`, `method`, `statusCode`, `durationMs` і обов’язковою опцією **`redact`** (`['req.headers.authorization', '*.password', '*.token']`), щоб паролі ніколи не осіли в файлах/ELK/Grafana Loki.
+- **Конфіг до `listen()`:** якщо `PORT` некоректний або не переданий `DATABASE_URL`, процес падає одразу при старті, а не під час першого запиту користувача.
+- **GitHub Actions (`.github/workflows/ci.yml`):** проганяє `npm ci` → `tsc --noEmit` → `npm test` → `docker build` на кожен PR, щоб у `main` не потрапляв некомпілюваний код.
+
+У завантаженому архіві цієї лабораторної (`.zip`) ми вже поклали готові шаблони `Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml` та `server.mjs` зі структурованим JSON-логуванням і `x-request-id` — реалізуй суворий `readConfig(env)` і запусти весь стенд локально.

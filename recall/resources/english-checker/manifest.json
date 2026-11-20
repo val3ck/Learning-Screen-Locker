@@ -1,0 +1,18 @@
+{
+  "languageTool": "6.6",
+  "java": "17.0.21+9",
+  "files": [
+    {
+      "url": "https://languagetool.org/download/LanguageTool-6.6.zip",
+      "file": "LanguageTool-6.6.zip",
+      "sha256": "53600506b399bb5ffe1e4c8dec794fd378212f14aaf38ccef9b6f89314d11631",
+      "bytes": 251998221
+    },
+    {
+      "url": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.21%2B9/OpenJDK17U-jre_x64_windows_hotspot_17.0.21_9.zip",
+      "file": "jre17-windows.zip",
+      "sha256": "fe4656bd78fb09812dc38c49da777f79cc33e7ee435a254be82f9e7f40d9d117",
+      "bytes": 43860024
+    }
+  ]
+}

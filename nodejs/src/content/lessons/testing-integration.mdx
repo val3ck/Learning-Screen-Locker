@@ -1,0 +1,40 @@
+## Які тести реально очікують на Strong Junior / Mid
+
+Unit-тести з моками не ловлять помилки в SQL, роутингу NestJS/Express, JSON-серіалізації та status codes. На роботі бекенд покривають двома-трьома рівнями тестів:
+
+1. **Unit-тести (швидкі, без мережі й БД):** перевіряють бізнес-логіку, розрахунки грошей, policy доступу, edge-кейси та мапінг помилок (`Vitest`, `Jest` або вбудований `node:test`).
+2. **HTTP Integration-тести (`Supertest` або `fetch`):** підіймають реальний Express/NestJS застосунок із `ValidationPipe`, `Guards` та `ExceptionFilter` і ганяють справжні HTTP-запити з підставним репозиторієм або тестовою БД.
+3. **Database / E2E тести (PostgreSQL у Docker / `Testcontainers` або `pglite`):** проганяють реальні міграції, `CHECK`/`UNIQUE` constraints і паралельні транзакції через `Promise.all`.
+
+```ts
+// 1. HTTP-контракт без ручного listen()
+const app = createApp(repository);
+await request(app)
+  .get('/items/one')
+  .expect(200)
+  .expect({ id: 'one', name: 'Book' });
+
+// 2. Справжня PostgreSQL у Testcontainers (ловить баги індексів, блокувань і SQL!)
+const container = await new PostgreSqlContainer('postgres:17-alpine').start();
+const pool = new Pool({ connectionString: container.getConnectionUri() });
+try {
+  await applyMigrations(pool);
+  // Тест на конкурентне списання / подвійне бронювання
+  const results = await Promise.allSettled([
+    bookSlot(pool, 'user-1', 'slot-1'),
+    bookSlot(pool, 'user-2', 'slot-1'),
+  ]);
+  // Рівно один виграє, другий ловить конфлікт!
+} finally {
+  await pool.end();
+  await container.stop();
+}
+```
+
+## Антипатерни в тестах, за які чіпляються на код-ревʼю
+
+- **Мокати власну бізнес-логіку або тестувати приватні методи:** тест має перевіряти вхідний HTTP/аргументи і вихідний JSON/стан БД. Тоді рефакторинг усередині сервісу не ламає тести.
+- **Спільний стан між тестами (`let items = []` на рівні модуля):** тести починають залежати від порядку запуску. Кожен тест або `describe` має ізолювати дані чи робити `TRUNCATE` / окрему транзакцію.
+- **Витік з’єднань і `setTimeout` у тестах:** завжди закривай `pool.end()`, `app.close()` та `container.stop()` у `finally`, інакше тестовий раннер зависне в CI.
+
+У лабораторній ти збереш HTTP-тест через `Supertest` проти реального Express-додатку: перевіриш 200, 400 (до виклику БД!), 404 та 500 без витоку паролів і внутрішніх полів.

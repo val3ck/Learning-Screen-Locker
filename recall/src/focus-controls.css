@@ -1,0 +1,19 @@
+.meeting-strip{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-top:22px;padding:14px 17px;border:1px solid #d9e0cc;background:#edf0e3;border-radius:7px;font-size:11px;color:#728266}
+.session-plan{font-size:11px;color:#80906d;margin:0 0 17px}
+#snooze-session{margin-bottom:18px;font-size:10px;color:#738463}
+.bonus-note{font-size:11px;background:#edf2e2;border-left:2px solid #9caf83;padding:11px 13px;margin:0 0 15px}
+.pause-note{margin:18px 0 25px!important;font-size:11px!important}
+.summary-card>#pause-longer{margin-left:12px}
+.next-lesson{margin-top:27px;padding:20px;text-align:left;border:1px solid #d8e0cb;border-radius:8px;background:#f3f6eb}
+.next-lesson>summary{font-size:14px;font-weight:600;color:#486c3b;line-height:1.7}
+.next-lesson>p{margin:15px 0;text-align:left;white-space:pre-line}
+.next-lesson pre{font:12px/1.8 Consolas,monospace;color:#3c6135;overflow:auto;background:#eaf0df;padding:18px;border-radius:6px}
+.next-lesson>details{margin:18px 0}
+#min-practice{font:12px 'Segoe UI',sans-serif;background:#f5f7ee;color:#506b43;border:1px solid #cad7bb;border-radius:5px;padding:9px 12px}
+.session-row{gap:12px;align-items:center}
+.focus-session .sidebar,.focus-session .topbar,.focus-session footer{display:none}
+.focus-session .main{margin:0 auto;padding:0 40px;max-width:1900px}
+.focus-session .session-heading{padding-top:25px}
+.focus-session .surrender-bar{left:40px;right:40px}
+.focus-session .surrender-bar:has(p:empty){left:auto}
+.focus-reminder{font-size:11px;color:#7a8b6b;margin-bottom:20px}

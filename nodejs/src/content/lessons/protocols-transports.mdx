@@ -1,0 +1,47 @@
+## HTTP/REST vs SSE vs WebSockets
+
+Для 85% задач Strong Junior вистачає HTTP/REST + OpenAPI. Але коли користувач має бачити прогрес задачі в реальному часі (наприклад, статус парсингу вакансій чи генерації звіту), є два легкі протоколи без зайвої складності:
+- **Server-Sent Events (SSE):** односторонній потік подій **сервер → браузер** поверх звичайного HTTP (`text/event-stream`). Ідеально для прогрес-барів, стрімінгу, нотифікацій. Нативно підтримується в NestJS через `@Sse()`.
+- **WebSockets:** двосторонній дуплекс (клієнт і сервер постійно шлють повідомлення одне одному) — чати, спільне редагування, live-ігри.
+
+```ts
+// Приклад SSE у NestJS контролері:
+@Sse('jobs/events')
+streamProgress(): Observable<MessageEvent> {
+  return interval(2000).pipe(
+    map((tick) => ({ data: { step: tick, status: 'processing' } })),
+  );
+}
+```
+
+У сирому фреймі SSE поля `id` та `event` розділяються переносами рядка `\n`, тому недовірений ввід із `\r` чи `\n` може підмінити тип події (CRLF injection) — завжди перевіряй їх перед форматуванням.
+
+## Практична зв’язка: Node.js / NestJS ↔ Go мікросервіс
+
+Твій головний козир на співбесідах — вміти з’єднати **Node.js API** (користувачі, права, OpenAPI, клієнт для React) та **швидкий Go-сервіс** (наприклад, твій `JobParser`, скрейпер чи обробник важких даних) як сусідній сервіс по внутрішньому HTTP JSON або черзі.
+
+Чому тут не можна писати наївний `await fetch(url).then(r => r.json())`:
+1. **Таймаут обов’язковий (`AbortSignal.timeout(2000)`):** якщо Go-сервіс завис, Node.js не повинен тримати відкритий сокет вічно і покласти пул з’єднань.
+2. **Контракт перевіряється через `Zod`:** навіть свій Go-сервіс після деплою може змінити назву поля (`salaryUsd` → `salary`). Схема відловить розсинхрон на межі одразу з чіткою помилкою `invalid_upstream_contract`.
+3. **Мапінг помилок:** якщо Go впав з 502/500, Node.js перетворює це на контрольований `502 Bad Gateway` / `503 Service Unavailable` або повертає кеш, не зливаючи внутрішні URL.
+
+```ts
+import { z } from 'zod';
+
+const GoJobsResponseSchema = z.object({
+  items: z.array(z.object({ id: z.string().min(1), title: z.string().min(1), salaryUsd: z.number().int().nonnegative() })),
+});
+
+export async function fetchFromGo(baseUrl: string, query: string) {
+  const url = new URL('/api/jobs', baseUrl);
+  if (query.trim()) url.searchParams.set('q', query.trim());
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+  if (!res.ok) throw new Error('upstream_http_error');
+  const parsed = GoJobsResponseSchema.safeParse(await res.json());
+  if (!parsed.success) throw new Error('invalid_upstream_contract');
+  return parsed.data.items;
+}
+```
+
+У лабораторній ти реалізуєш обидві частини на реальному `zod`: безпечний `formatSse` і стійкий клієнт `fetchGoJobs` із `AbortSignal.timeout` та перевіркою контракту Go-сервісу.

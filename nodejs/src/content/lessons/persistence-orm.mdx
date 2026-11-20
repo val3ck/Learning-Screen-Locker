@@ -1,0 +1,55 @@
+## ORM змінює інтерфейс, але не скасовує SQL
+
+ORM (на Node.js найчастіше **Prisma** або **Drizzle**, у legacy NestJS-проєктах часто **TypeORM**) описує схему БД, генерує типізований клієнт і керує міграціями (`prisma migrate dev` локально, `prisma migrate deploy` у CI/проді).
+
+Водночас порядок запитів, транзакції, індекси та обсяг прочитаних колонок залишаються твоєю відповідальністю. Навіть ідеальний TypeScript-код із ORM покладе базу, якщо завантажувати зайві зв’язки в циклі або забувати про конкурентні оновлення.
+
+```prisma
+// schema.prisma
+model Customer {
+  id     String  @id @default(uuid())
+  name   String
+  orders Order[]
+}
+
+model Order {
+  id         String   @id @default(uuid())
+  totalCents Int
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([customerId])
+}
+```
+
+## Як вирішуються N+1 та гонки в Prisma на практиці
+
+Класична помилка джуна — витягнути 100 замовлень, а потім у `for..of` зробити ще 100 запитів за замовниками (101 запит замість 1–2). У Prisma це лікується через `include` (або в ручному repository через пакетне читання `WHERE id = ANY($1)`).
+
+```ts
+// 1. N+1 безпечно: один JOIN або два пакетні запити (залежно від relationLoadStrategy)
+const orders = await prisma.order.findMany({
+  take: 50,
+  include: { customer: { select: { id: true, name: true } } },
+});
+
+// 2. Транзакція та уникнення race condition на залишку/балансі:
+await prisma.$transaction(async (tx) => {
+  // Атомарний умовний update рятує від гонки двох паралельних запитів
+  const updated = await tx.slot.updateMany({
+    where: { id: slotId, available: { gte: seats } },
+    data: { available: { decrement: seats } },
+  });
+  if (updated.count === 0) {
+    throw new Error('SLOT_CONFLICT');
+  }
+  return tx.booking.create({ data: { slotId, userId, seats } });
+});
+```
+
+### Що питають на співбесідах (Strong Junior / Mid):
+- **Prisma vs Drizzle vs `pg`:** Prisma дає найкращий DX і декларативні міграції; Drizzle ближче до чистого SQL і легший у serverless/edge; `pg` дає повний контроль складних SQL-конструкцій без магії ORM.
+- **Чому не можна «перевірити в `findUnique`, а потім зробити `update`»?** Між двома запитами інший запит змінить рядок. Інваріант гарантує або умовний `UPDATE ... WHERE ...`, або `SELECT ... FOR UPDATE` всередині транзакції, або `CHECK`/`UNIQUE` constraint у самій PostgreSQL.
+- **Коли читати двома запитами, а коли JOIN?** Два пакетні читання (`orders`, потім `customers WHERE id = ANY(...)`) простіші для пагінації без дублювання батьківських рядків, а один `JOIN` гарантує знімок даних на один момент часу.
+
+У лабораторній ти реалізуєш пакетне усунення N+1 через repository-контракт: 0 зайвих запитів для порожнього списку, 1 пакетний запит для унікальних `customerId`, і явна помилка при порушеній цілісності посилання.

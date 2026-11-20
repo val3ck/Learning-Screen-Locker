@@ -1,0 +1,49 @@
+## Шари відповідальності і Dependency Injection
+
+У робочому NestJS-проєкті типова структура модуля ділиться на три чіткі шари:
+1. **Controller** — приймає HTTP-запит, дістає DTO / параметри / поточного користувача і повертає HTTP-відповідь. Жодної бізнес-логіки й SQL усередині.
+2. **Service** — виконує бізнес-правила, перевіряє права на конкретний ресурс і координує транзакції.
+3. **Repository / Port** — інкапсулює роботу з PostgreSQL / Prisma / зовнішнім API.
+
+Коли сервіс створює залежність сам (`new PostgresRepo()`), його неможливо легко підмінити в unit-тесті. Dependency Injection передає залежність через конструктор, а модуль (`@Module`) вирішує, яку саме реалізацію підставити.
+
+```ts
+export const BOOKING_REPO = Symbol('BOOKING_REPO');
+
+export interface BookingRepository {
+  findById(id: string): Promise<{ id: string; ownerId: string } | null>;
+}
+
+@Injectable()
+export class BookingsService {
+  constructor(
+    @Inject(BOOKING_REPO) private readonly repo: BookingRepository,
+  ) {}
+
+  async getOwned(id: string, userId: string) {
+    const booking = await this.repo.findById(id);
+    if (!booking || booking.ownerId !== userId) {
+      throw new NotFoundException('Бронювання не знайдено');
+    }
+    return booking;
+  }
+}
+
+@Module({
+  controllers: [BookingsController],
+  providers: [
+    BookingsService,
+    { provide: BOOKING_REPO, useClass: PrismaBookingRepository },
+  ],
+  exports: [BookingsService], // іншим модулям доступний лише сервіс, а не сирі кишки
+})
+export class BookingsModule {}
+```
+
+## Чому потрібен `Symbol` або `useFactory`
+
+- **TypeScript-інтерфейси зникають при компіляції у JS.** Тому `@Inject(BOOKING_REPO)` зі стабільним токеном (`Symbol` або рядком) підказує NestJS контейнеру, який саме провайдер ін’єктувати.
+- **Конфіг і асинхронні підключення (`useFactory`):** коли провайдер залежить від `ConfigService` (наприклад, створення пулу БД або Redis клієнта), використовують `useFactory: async (config) => ...` та `inject: [ConfigService]`.
+- **Пастка повторної реєстрації:** якщо додати той самий stateful-сервіс у `providers` двох різних модулів замість того, щоб один раз експортувати (`exports`) і імпортувати модуль (`imports`), Nest створить два окремі екземпляри.
+
+У лабораторній ти збереш справжній `@Module` з кастомним токеном `RATES` та перевіриш підміну залежності через `Test.createTestingModule(...).overrideProvider(RATES)` — це базовий прийом тестування NestJS-сервісів.

@@ -1,0 +1,1 @@
+{"name":"postgres-path","version":"1.0.0","private":true,"type":"module","scripts":{"start":"node server.mjs","test":"node test.mjs"},"dependencies":{"@electric-sql/pglite":"0.3.14"}}

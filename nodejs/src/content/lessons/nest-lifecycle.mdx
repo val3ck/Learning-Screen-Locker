@@ -1,0 +1,39 @@
+## Точний порядок проходження HTTP-запиту в NestJS
+
+На технічних співбесідах по NestJS майже завжди питають порядок виконання шарів. Ось правильний ланцюжок:
+
+1. **Middleware** — низькорівневий шар до роутингу NestJS (додавання `x-request-id`, парсинг cookie, helmet, HTTP логер). Не знає, який контролер чи `@Roles` буде далі.
+2. **Guards (`CanActivate`)** — приймають рішення про доступ (`true` / `false` / `401` / `403`). Тут уже доступний `ExecutionContext` з метаданими `@Roles()`, тож спочатку перевіряється токен (`JwtAuthGuard`), а потім права (`RolesGuard`).
+3. **Interceptors (до контролера)** — вимір часу виконання, кешування, трасування.
+4. **Pipes (`ValidationPipe`, `ParseIntPipe`)** — валідація й перетворення `@Body()`, `@Query()`, `@Param()` безпосередньо перед викликом методу.
+5. **Controller + Service** — виконання операції.
+6. **Interceptors (після контролера)** — трансформація успішної відповіді або логування тривалості.
+7. **Exception Filters (`@Catch`)** — єдина точка перетворення помилок у контрольований JSON (`400`, `404`, `409`, `500`).
+
+```ts
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    const requiredRoles = this.reflector.getAllAndOverride<string[]>('roles', [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (!requiredRoles?.length) return true;
+    const req = context.switchToHttp().getRequest();
+    return requiredRoles.some((role) => req.user?.roles?.includes(role));
+  }
+}
+```
+
+Зверни увагу: `Guard` контролера відповідає лише за грубі ролі (`admin`, `editor`), але **перевірку власника конкретного запису (`booking.ownerId === user.id`) треба тримати в сервісі або запиті до БД**, щоб не плодити дублювання між маршрутами.
+
+## Graceful Shutdown: не обривай живі запити при деплої
+
+Коли Kubernetes або Docker Compose зупиняє контейнер для оновлення, процесу надходить `SIGTERM`. Правильна послідовність завершення:
+1. Увімкнути `app.enableShutdownHooks()` у `main.ts`.
+2. Спершу зупинити прийом нових HTTP-запитів і черг, дочекатися активних транзакцій у межах таймауту (drain).
+3. Лише **після** цього закрити `pool` PostgreSQL та з’єднання Redis (залежні ресурси закриваються раніше за ресурси, від яких вони залежать).
+
+У лабораторній модель `createShutdown` перевіряє зворотний порядок закриття, стійкість до збою одного з ресурсів (помилка Redis не блокує закриття Postgres) та ідемпотентність при одночасних сигналах `SIGTERM` + `SIGINT`.

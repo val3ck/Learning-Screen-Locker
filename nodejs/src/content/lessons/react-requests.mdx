@@ -1,0 +1,55 @@
+## Чотири стани запиту і гонка при пошуку
+
+Кожен HTTP-запит із React має чотири різні стани інтерфейсу: **loading**, **success з даними**, **empty** (успішна відповідь `[]`, але показувати нічого) та **error**. Порожній список не можна маскувати під помилку, і навпаки.
+
+Друга класична проблема — race condition: користувач швидко ввів `"n"`, потім `"node"`. Другий запит відповів за 40 мс, а перший — за 400 мс і перезаписав екран старими даними. Тому у `useEffect` попередній запит скасовують через **`AbortController`**, а відповідь перевіряють через `response.ok` і валідують:
+
+```tsx
+useEffect(() => {
+  const controller = new AbortController();
+  setStatus('loading');
+  getTopics(controller.signal)
+    .then((data) => {
+      setTopics(data);
+      setStatus('ready');
+    })
+    .catch((error) => {
+      if (error.name !== 'AbortError') setStatus('error');
+    });
+  return () => controller.abort();
+}, [query]);
+```
+
+## Як це пишуть у реальних проєктах: TanStack Query (React Query)
+
+На комерційних проєктах ручний `useEffect` + `loading/error` майже не пишуть — для серверного стану беруть **`@tanstack/react-query`**. Він автоматично передає `signal` для скасування застарілих запитів, кешує відповіді, дедуплікує паралельні рендери та оновлює список після мутацій (`invalidateQueries`).
+
+```tsx
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
+function BookingsPanel() {
+  const queryClient = useQueryClient();
+
+  const { data, isPending, isError } = useQuery({
+    queryKey: ['bookings', { status: 'active' }],
+    queryFn: ({ signal }) => fetchBookings({ signal }), // TanStack передає AbortSignal сам
+    staleTime: 30_000,
+  });
+
+  const createBooking = useMutation({
+    mutationFn: postBooking,
+    onSuccess: () => {
+      // Інвалідує кеш списку після успішного POST
+      queryClient.invalidateQueries({ queryKey: ['bookings'] });
+    },
+  });
+
+  if (isPending) return <p>Завантаження…</p>;
+  if (isError) return <p>Не вдалося завантажити бронювання</p>;
+  return <BookingList items={data} onBook={createBooking.mutate} />;
+}
+```
+
+Залізне правило безпеки на клієнті: жодних секретних API-ключів у `.env` з префіксом `VITE_` — користувач завжди може відкрити DevTools і побачити будь-який токен, зашитий у React-бандл.
+
+У лабораторній ти реалізуєш типований клієнт `getTopics(fetcher, signal)` із перевіркою `response.ok`, фільтрацією/валідацією форми JSON та коректним прокиданням `AbortSignal` — це рівно та логіка, яка потім заходить у `queryFn` для TanStack Query (працюватиме як із твоїм NestJS API, так і з Go API).

@@ -1,0 +1,69 @@
+:root { color-scheme: dark; font: 15px 'Segoe UI', sans-serif; background: #1c241f; color: #f1f5ef; }
+body { margin: 0; }
+main { padding: 18px 23px; }
+h1 { font-size: 21px; margin: 0 0 8px; }
+p { line-height: 1.5; color: #c6d4c8; margin: 8px 0 16px; }
+button { font: inherit; color: inherit; border: 1px solid #657764; border-radius: 8px; background: transparent; padding: 10px 13px; cursor: pointer; }
+button.primary { background: #bfd3a8; color: #192017; border-color: #bfd3a8; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
+.actions.secondary { margin-top: 24px; }
+label { display: block; margin: 16px 0 8px; }
+input[type=password] { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #657764; border-radius: 8px; background: #141a16; color: inherit; }
+:focus-visible { outline: 2px solid #bfd3a8; outline-offset: 3px; }
+#message { color: #ffdbb6; overflow-wrap: anywhere; }
+
+:root:has([data-screen="invitation"]) { background: transparent; }
+
+[data-screen="invitation"] {
+  box-sizing: border-box;
+  display: grid;
+  align-items: end;
+  min-height: 100vh;
+  padding: 6px 10px 12px;
+  font: 13px/1.4 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  color: #f6f9f5;
+}
+
+[data-screen="invitation"] main {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid rgb(218 236 220 / 32%);
+  border-radius: 17px;
+  background: linear-gradient(135deg, rgb(32 44 38 / 98%), rgb(19 27 23 / 98%));
+  box-shadow: 0 4px 9px rgb(0 0 0 / 42%);
+}
+
+[data-screen="invitation"] h1 {
+  margin: 0;
+  font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -.015em;
+  line-height: 1.2;
+}
+
+[data-screen="invitation"] p { margin: 5px 0 0; color: #dbe6dc; line-height: 1.4; }
+[data-screen="invitation"] main:has(#message:not([hidden])) #description { display: none; }
+[data-screen="invitation"] #message { max-height: 38px; overflow: auto; }
+[data-screen="invitation"] .actions { margin-top: 12px; }
+
+[data-screen="invitation"] button {
+  flex: 1 0 auto;
+  min-height: 33px;
+  padding: 6px 10px;
+  border-color: #576b5f;
+  border-radius: 8px;
+  background: #2c3b33;
+  white-space: nowrap;
+}
+
+[data-screen="invitation"] button:hover { background: #3b4e42; }
+
+[data-screen="invitation"] button.primary {
+  border-color: transparent;
+  background: #c6ddbd;
+  color: #18291b;
+  font-weight: 600;
+}
+
+[data-screen="invitation"] button.primary:hover { background: #d6ebce; }

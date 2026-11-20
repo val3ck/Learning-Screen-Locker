@@ -1,0 +1,69 @@
+## Єдина валідація + OpenAPI / Swagger контракт
+
+Документація API жива лише тоді, коли збігається з кодом. Якщо OpenAPI-файл лежить окремо й ніколи не звіряється з маршрутами, через місяць фронтенд буде ламатись на змінених полях.
+
+У Express продакшен-пайплайн зазвичай об’єднує middleware валідації на `Zod` та автодокументацію OpenAPI (або `swagger-ui-express` на `/docs`), де описані й успішні `200`/`201`, і стабільні `400`/`404`/`409`.
+
+```ts
+import { z } from 'zod';
+import type { RequestHandler } from 'express';
+
+const OrdersQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().min(1).optional(),
+});
+
+export function validateQuery(schema: z.ZodTypeAny): RequestHandler {
+  return (req, res, next) => {
+    const parsed = schema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    res.locals.query = parsed.data;
+    next();
+  };
+}
+```
+
+Зверни увагу на `res.status(400)` до виклику БД: сміття відсіюється миттєво. У фрагменті OpenAPI завжди фіксуй порядок сортування (наприклад, `ORDER BY id ASC`), бо без нього пагінація не має стабільного сенсу.
+
+```yaml
+paths:
+  /orders:
+    get:
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        '200': { description: Сторінка замовлень }
+        '400': { description: Некоректні параметри }
+```
+
+## Cursor (keyset) пагінація замість повільного `OFFSET`
+
+`OFFSET 50000 LIMIT 20` змушує PostgreSQL прочитати і викинути 50 тисяч рядків. Для реальних списків і стрічок використовують keyset/cursor: умова `id > afterId` миттєво йде по B-tree індексу. Сервер бере `limit + 1` рядків: зайвий рядок показує, чи є наступна сторінка, не роблячи зайвий `COUNT(*)`.
+
+```sql
+SELECT id, total_cents, created_at
+FROM orders
+WHERE id > $1
+ORDER BY id ASC
+LIMIT $2; -- передаємо limit + 1
+```
+
+Кодування курсора в `base64url` робить його зручним для URL, але **не шифрує і не замінює перевірку доступу** (`WHERE tenant_id = $3`). На реальних проєктах, якщо сортуєш за `created_at DESC`, одного timestamp мало — дві події можуть збігтися до мілісекунди. Тоді роблять складений курсор `(created_at, id)`:
+
+```sql
+WHERE (created_at, id) < ($1, $2)
+ORDER BY created_at DESC, id DESC
+LIMIT $3;
+```
+
+У лабораторній ти відділиш парсинг query та пакування cursor від HTTP-транспорту, перевіриш канонічність `base64url` (відсікаючи сміттєві рядки), межі `limit` 1..100 і перенесення на реальний `Express` маршрут.

@@ -1,0 +1,91 @@
+import { useEffect, useState } from 'react';
+import type { Step } from './lib/progress';
+
+export interface NightStep {
+  id: string;
+  lessonId: string;
+  lesson: string;
+  module: string;
+  section: Step;
+  minutes: number;
+  title: string;
+  criteriaDone: number;
+  criteriaTotal: number;
+  lessonsDone: number;
+  lessonsTotal: number;
+}
+export interface NightView {
+  deadline: number;
+  phase: 'loading' | 'learning' | 'editor' | 'wrap-up' | 'finished';
+  step: NightStep;
+  next: NightStep | null;
+  done: number;
+  stepDone: boolean;
+  completedModules: number;
+  totalModules: number;
+  criteriaDone: number;
+  lessonsDone: number;
+}
+type Ask = { lesson: string; section: Step; question: string; code: string; btw?: boolean };
+declare global {
+  interface Window {
+    recallNode?: {
+      ready(): Promise<NightView>;
+      subscribe(render: (state: NightView) => void): () => void;
+      act(action: 'editor' | 'next' | 'exit'): Promise<void>;
+      ask(request: Ask): Promise<string | { answer: string; provider?: string; model?: string }>;
+    };
+  }
+}
+
+export function useNightView() {
+  const [view, setView] = useState<NightView | null>(null);
+  useEffect(() => {
+    if (!window.recallNode) return;
+    let disposed = false;
+    const remove = window.recallNode.subscribe(state => { if (!disposed) setView(state); });
+    void window.recallNode.ready().then(state => { if (!disposed) setView(state); }).catch(() => {});
+    return () => { disposed = true; remove(); };
+  }, []);
+  useEffect(() => {
+    if (!view?.step.lessonId || view.phase === 'finished') return;
+    const route = '#/lesson/' + view.step.lessonId;
+    if (location.hash !== route) location.hash = route;
+  }, [view?.step.id]);
+  return view;
+}
+
+export function NightPanel({ view, save, lunaOpen, onToggleLuna }: {
+  view: NightView; lesson?: string; section?: Step; save: () => Promise<void>;
+  lunaOpen?: boolean; onToggleLuna?: () => void;
+}) {
+  const [now, setNow] = useState(Date.now);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, Math.ceil((view.deadline - now) / 1000));
+  const elapsed = view.phase === 'wrap-up' || view.phase === 'finished' || seconds === 0 && view.deadline !== 0;
+  const time = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+  async function act(action: 'editor' | 'next' | 'exit') {
+    try { setError(''); await save(); await window.recallNode!.act(action); }
+    catch (e) { setError((e as Error).message); }
+  }
+  return <aside className="night-bar" aria-label="Нічна сесія Node.js">
+    <div className="night-bar-content">
+      <div>
+        <strong>{elapsed ? 'Час минув — можна закруглятись' : 'Нічний Node.js · ' + time}</strong>
+        <p>{view.phase === 'finished' ? 'Можна зберегти й закрити вікно.' : view.step.title}</p>
+        <p className="night-counts">Кроки {view.done}/3 · Критерії {view.criteriaDone}/{view.step.criteriaTotal} · Уроки {view.lessonsDone}/{view.step.lessonsTotal} · Модулі {view.completedModules}/{view.totalModules}</p>
+      </div>
+      <div className="night-actions">
+        {!elapsed && view.next && <button className="button primary" onClick={() => void act('next')}>Ще один крок · {view.next.minutes} хв</button>}
+        {!elapsed && view.step.section === 'practice' && !view.stepDone && <button className="button secondary" onClick={() => void act('editor')}>Практика в редакторі</button>}
+        {(elapsed || view.stepDone) && <button className="button secondary" onClick={() => void act('exit')}>Зберегти й вийти</button>}
+        {onToggleLuna && <button className="button secondary" aria-expanded={!!lunaOpen} aria-controls="node-chat-panel" onClick={onToggleLuna}>Luna</button>}
+      </div>
+    </div>
+    {error && <p className="night-error" role="alert">{error}</p>}
+  </aside>;
+}

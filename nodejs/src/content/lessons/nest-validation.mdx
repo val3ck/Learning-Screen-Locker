@@ -1,0 +1,53 @@
+## JSON не має гарантій типізації
+
+Опис параметра `@Body() dto: CreateBookingDto` допомагає лише редактору коду: після компіляції у JavaScript типи зникають. На межу сервера приходять довільні JSON-байти з зайвими полями, пробілами чи рядком `"2"` замість числа `2`.
+
+Стандарт у NestJS — декларативні DTO (`class-validator` + `class-transformer`), глобальний **`ValidationPipe`** та автогенерація **OpenAPI / Swagger** прямо з тих самих класів, щоб документація ніколи не розходилася з кодом.
+
+```ts
+import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
+import { IsInt, IsNotEmpty, IsString, Max, Min } from 'class-validator';
+
+export class CreateBookingDto {
+  @ApiProperty({ example: 'morning-10', description: 'Ідентифікатор слоту' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @IsNotEmpty()
+  slotId!: string;
+
+  @ApiProperty({ example: 2, minimum: 1, maximum: 5 })
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  seats!: number;
+}
+```
+
+## Бойове налаштування `ValidationPipe`, Swagger та помилок у `main.ts`
+
+```ts
+app.useGlobalPipes(
+  new ValidationPipe({
+    whitelist: true,            // вирізає поля без декораторів
+    forbidNonWhitelisted: true, // кидає 400, якщо прийшли зайві поля на кшталт admin: true
+    transform: true,            // перетворює plain JSON у екземпляр DTO (запускає @Transform)
+  }),
+);
+
+// Автодокументація Swagger на /docs (на проді зазвичай ховають за env-прапорцем)
+const swaggerConfig = new DocumentBuilder()
+  .setTitle('Booking API')
+  .setVersion('1.0')
+  .addBearerAuth()
+  .build();
+const doc = SwaggerModule.createDocument(app, swaggerConfig);
+SwaggerModule.setup('docs', app, doc);
+```
+
+### Важливі нюанси на співбесіді:
+1. **`enableImplicitConversion: true` небезпечний для JSON-тіла:** із ним рядок `"abc"` або `""` може тихо перетворитися на `NaN` чи `0`. Краще не вмикати його глобально, а для URL/query (`@Param('id', ParseIntPipe)`) використовувати явні пайпи NestJS.
+2. **Альтернатива `nestjs-zod`:** багато нових TS-команд замість `class-validator` ставлять `nestjs-zod`, щоб ділити одні й ті ж `Zod`-схеми між бекендом і фронтендом. Логіка `ValidationPipe` там ідентична.
+3. **Не повертай сирі помилки БД клієнту:** глобальний `@Catch()` `ExceptionFilter` ловить невідомі збої (SQL/Redis), логує їх з `requestId`, а клієнту завжди віддає чистий `500 Internal error` без деталей інфраструктури.
+
+У лабораторній нижче ти піднімеш справжній NestJS HTTP-застосунок з `BookingsController`, навісиш `ValidationPipe` та проженеш по ньому реальні HTTP `POST /bookings` запити на 201 і 400!

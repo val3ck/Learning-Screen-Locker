@@ -1,0 +1,32 @@
+## Ідентичність і дозвіл — різні перевірки (OWASP IDOR / BOLA)
+
+**Authentication (401)** відповідає на питання «хто ти?» (токен/сесія валідні). **Authorization (403 / 404)** відповідає «чи маєш ти право на саме цей ресурс і цю дію?».
+
+Найчастіша критична вразливість у джунських бекендах — **BOLA / IDOR**: маршрут перевіряє, що юзер залогінений (`JwtAuthGuard`), але не перевіряє, кому належить `GET /bookings/42`. Будь-хто може перебрати ID `42`, `43`, `44` і витягти чужі замовлення.
+
+```ts
+// Погано: перевірили лише роль або наявність токена, забули tenant + owner
+// async update(id: string, dto: UpdateDto) { return prisma.doc.update({ where: { id }, ... }); }
+
+// Добре: ізоляція tenant + перевірка власника в сервісі та в умові запису
+async function updateDocument(actor: Actor, id: string, changes: UpdateInput) {
+  const document = await documents.find(id);
+  if (!document || document.tenantId !== actor.tenantId) {
+    throw new NotFoundException(); // 404 не видає навіть факту існування чужого tenant
+  }
+  if (document.ownerId !== actor.id && !actor.roles.includes('editor') && !actor.roles.includes('admin')) {
+    throw new ForbiddenException();
+  }
+  // Для захисту від гонки прав додаємо tenant_id прямо у WHERE при записі!
+  return documents.updateScoped({ id, tenantId: actor.tenantId }, changes);
+}
+```
+
+## Золоті правила контролю доступу на проді
+
+1. **Ніколи не бери `userId`, `ownerId` або `tenantId` із `req.body`.** Ідентичність береться виключно з перевіреної на сервері сесії чи JWT (`req.user.userId`).
+2. **Роль у межах організації ≠ суперадмін усієї системи.** Навіть `admin` організації A не має читати документи організації B (`tenantId` перевіряється першим).
+3. **Fail closed («заборонено за замовчуванням»):** невідома дія (`publish`), `null` замість ролей або відсутній ресурс завжди дають `false` / відмову.
+4. **Єдина політика, а не копіпаста в 10 контролерах:** перевірка доступу має жити в сервісі або окремому `PolicyService`, щоб фоновий воркер або GraphQL/WebSocket маршрут не зміг її обійти.
+
+У лабораторній ти протестуєш чисту функцію `canAccess(actor, document, action)` по повній матриці `owner / editor / admin / чужий tenant / невідома дія` — переконайся, що кожен негативний кейс явно заблокований.

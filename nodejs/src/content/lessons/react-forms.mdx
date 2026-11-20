@@ -1,0 +1,55 @@
+## Базова механіка контрольованої форми в React
+
+У керованій формі React тримає значення поля у `useState` або контролері форми, а `onChange` оновлює стан. Це дає миттєвий фідбек, блокування повторного відправлення під час завантаження та збереження введених даних, якщо сервер повернув помилку.
+
+```tsx
+const [email, setEmail] = useState('');
+const [error, setError] = useState('');
+
+<label htmlFor="email">Електронна пошта</label>
+<input
+  id="email"
+  value={email}
+  onChange={(event) => setEmail(event.target.value)}
+  aria-invalid={Boolean(error)}
+  aria-describedby={error ? 'email-error' : undefined}
+/>
+{error && <p id="email-error">{error}</p>}
+```
+
+Головне правило: клієнтська валідація покращує UX і допомагає людині швидше виправити помилку, але сервер усе одно перевіряє кожне поле повторно (`Zod` або `ValidationPipe`). Під час `submit` викликай `event.preventDefault()`, перевіряй значення та одразу блокуй кнопку (`disabled={isSubmitting}`), щоб подвійний клік не відправив два замовлення. Після серверної відмови не стирай введені поля, а покажи конкретне пояснення поруч із потрібним `input` (і перенеси туди фокус, якщо користувач працює лише з клавіатури).
+
+## Як це пишуть на проді: React Hook Form + Zod
+
+Коли в формі 6–15 полів, тримати десяток `useState` незручно, та й зайві ререндери заважають. Стандарт комерційних React-проєктів — **`react-hook-form` + `@hookform/resolvers/zod`**: та сама `Zod`-схема валідує і форму в браузері, і тіло запиту на бекенді без дублювання правил.
+
+```tsx
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+
+const LoginSchema = z.object({
+  email: z.string().trim().email('Вкажи коректний email'),
+  password: z.string().min(8, 'Мінімум 8 символів'),
+});
+
+type LoginInput = z.infer<typeof LoginSchema>;
+
+export function LoginForm({ onSubmit }: { onSubmit: (data: LoginInput) => Promise<void> }) {
+  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginInput>({
+    resolver: zodResolver(LoginSchema),
+  });
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)}>
+      <input {...register('email')} aria-invalid={Boolean(errors.email)} />
+      {errors.email && <span>{errors.email.message}</span>}
+      <input type="password" {...register('password')} />
+      {errors.password && <span>{errors.password.message}</span>}
+      <button disabled={isSubmitting}>{isSubmitting ? 'Вхід…' : 'Увійти'}</button>
+    </form>
+  );
+}
+```
+
+У лабораторній ти напишеш чисту валідаційну функцію без сторонніх залежностей і протестуєш порожні, надто довгі, пробільні та граничні значення. Коли ця базова механіка зрозуміла, у пет-проєкті сміливо став `react-hook-form`, `zod` та `Tailwind CSS` і підключай форму до свого Node.js або Go API.

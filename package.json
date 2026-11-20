@@ -1,0 +1,18 @@
+{
+  "name": "recall-learning-suite",
+  "version": "1.0.0",
+  "private": true,
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "install:apps": "npm ci --prefix SQL && npm ci --prefix english && npm ci --prefix nodejs && npm ci --prefix recall",
+    "setup": "npm run install:apps && npm run build",
+    "build": "npm --prefix nodejs run build && npm --prefix recall run build",
+    "test": "npm --prefix SQL test && npm --prefix english test && npm --prefix nodejs test && npm --prefix recall test",
+    "start": "npm --prefix recall start",
+    "demo": "npm --prefix recall run demo",
+    "start:english": "npm --prefix english start",
+    "start:sql": "npm --prefix SQL start",
+    "start:node": "npm --prefix nodejs run serve",
+    "package:win": "npm --prefix nodejs run build && npm --prefix recall run package"
+  }
+}

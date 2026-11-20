@@ -1,0 +1,55 @@
+## Зовнішні дані починаються з `unknown`
+
+Відповідь зовнішнього API, JSON-файл і тіло HTTP-запиту (`req.body`) можуть не відповідати очікуваній формі. Тип `unknown` чесно це моделює: значення існує, але TypeScript не дозволить читати його поля до явної перевірки. На відміну від `any`, `unknown` змушує побудувати кордон безпеки.
+
+```ts
+// Погано: as не виконує жодної перевірки під час виконання
+const profile = JSON.parse(raw) as { id: number; name: string }; // впаде або пропустить role: 'admin'
+
+// Добре для швидкої базової перевірки: ручний narrowing
+function readName(input: unknown): string {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new TypeError('Очікується об’єкт');
+  }
+  const value = input as Record<string, unknown>;
+  if (typeof value.name !== 'string' || value.name.trim() === '') {
+    throw new TypeError('Потрібне непорожнє ім’я');
+  }
+  return value.name.trim();
+}
+```
+
+Чому важлива кожна умова: історично `typeof null === 'object'`, а `typeof [] === 'object'`, тому без `!Array.isArray` та `!== null` код легко пропустить сміття.
+
+## Продакшен-стандарт: декларативні схеми Zod
+
+Писати по 30 рядків `typeof`-умов на кожен endpoint довго й легко помилитися. На реальних TypeScript-проєктах межу даних описують через **`zod`**: одна схема дає одразу і runtime-валідацію, і TypeScript-тип через `z.infer`.
+
+```ts
+import { z } from 'zod';
+
+export const ProfileSchema = z.object({
+  id: z.number().int().positive().refine(Number.isSafeInteger, 'Небезпечне ціле'),
+  name: z.string().trim().min(1, 'Ім’я обов’язкове'),
+  email: z.string().email('Невалідний email').optional(),
+});
+
+// Тип виводиться автоматично — один контракт без дублювання!
+export type Profile = z.infer<typeof ProfileSchema>;
+
+export function parseProfileSafe(input: unknown) {
+  const result = ProfileSchema.safeParse(input);
+  if (!result.success) {
+    // flatten() повертає акуратні помилки по полях для HTTP 400
+    return { ok: false as const, errors: result.error.flatten().fieldErrors };
+  }
+  return { ok: true as const, data: result.data };
+}
+```
+
+Зверни увагу на три важливі властивості:
+1. **`z.object(...)` за замовчуванням очищує зайві поля (`strip`)** — якщо клієнт передасть `{ id: 3, name: 'Іра', role: 'admin' }`, у `result.data` залишиться лише те, що описано в схемі. Для суворого відхилення невідомих полів з помилкою є `z.strictObject(...)`.
+2. **`.optional()` ≠ `null`** — якщо клієнт надішле `email: null`, схема справедливо відхилить це. Дозвіл на `null` описують окремо (`.nullable()`).
+3. **Та сама схема рятує конфіг стартапу:** на роботі `Zod` часто перевіряє `process.env` при запуску сервера, щоб застосунок одразу впав із зрозумілою помилкою, якщо забули `DATABASE_URL` або `JWT_SECRET`.
+
+У лабораторній нижче ти реалізуєш реальну `ProfileSchema` через встановлений пакет `zod`, перевіриш відкидання зайвих полів і граничні типи `unknown`.

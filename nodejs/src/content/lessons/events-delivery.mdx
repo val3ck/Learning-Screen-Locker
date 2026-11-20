@@ -1,0 +1,42 @@
+## Подія може прийти двічі (At-Least-Once Delivery)
+
+Брокер повідомлень (RabbitMQ, SQS або BullMQ на Redis) гарантує доставку *щонайменше один раз*: якщо споживач виконав запис у БД і впав до підтвердження (`ack`), брокер надішле те саме повідомлення ще раз. Тому **кожен consumer зобов’язаний бути ідемпотентним**.
+
+```ts
+// Єдино правильний порядок усередині однієї транзакції PostgreSQL:
+await store.transaction(async (tx) => {
+  if (await tx.seen(event.id)) return 'duplicate'; // перевірка inbox-таблиці з UNIQUE(event_id)
+  await tx.apply(event);
+  await tx.markSeen(event.id);
+  return 'applied';
+});
+```
+
+Чому важливе **одне сховище**: якщо ти зробиш бізнес-ефект у PostgreSQL, а `seen` запишеш у локальний `Set` або навіть окремо в Redis, збій живлення між двома операціями створить дубль.
+
+## BullMQ (Redis) і RabbitMQ (`amqplib`) на практиці
+
+Для 90% Node.js команд вистачає **BullMQ** або **RabbitMQ** (а важку Kafka вчать уже під конкретний high-load проєкт):
+- **BullMQ (через Redis):** простий старт на стеку NestJS (`@nestjs/bullmq`), відкладені джоби (`delay`), крон-розклад, експоненційний `backoff` і черга впалих задач для аналізу.
+- **RabbitMQ (AMQP):** ідеальний, коли **Node.js кладе повідомлення в чергу, а Go-воркер його розбирає** (або навпаки), бо обидві мови чудово говорять по JSON через AMQP!
+
+```js
+// Фрагмент споживача RabbitMQ (amqplib) з контролем навантаження і DLQ:
+channel.prefetch(10); // не тягнемо 1000 повідомлень у пам’ять одного воркера
+channel.consume('jobs.parse', async (msg) => {
+  if (!msg) return;
+  try {
+    const event = JSON.parse(msg.content.toString());
+    await processIdempotently(event);
+    channel.ack(msg); // підтверджуємо ТІЛЬКИ після успішного COMMIT у БД!
+  } catch (err) {
+    const requeue = isTransientError(err);
+    // Постійну помилку (невалідний JSON) відправляємо без requeue в Dead-Letter Exchange (DLX)
+    channel.nack(msg, false, requeue);
+  }
+});
+```
+
+Обов’язкове правило на співбесіді: без `prefetch` та обмеження кількості повторів (`retry limit` + `DLQ`) одна бита подія зациклить воркер на 100% CPU.
+
+У лабораторній ти реалізуєш транзакційний `consume(event, store)` і перевіриш захист від подвійного ефекту при повторній доставці та відкат `seen` при тимчасовому падінні.
