@@ -150,7 +150,7 @@ async function initialize(){
     await refresh();
     if(event.type==='english'){page='english';render();return;}
     if(event.type==='daily'||event.type==='practice'){session=boot.activeSession;page=session?.paused?'paused':'session';feedback=null;previousTick=Date.now();if(!session?.paused)await initializeRunner();else render();}
-    else if(page!=='session')render();
+    else if(page!=='session'&&(page!=='english'||event.type!=='schedule'&&event.type!=='progress'))render();
   });});
 }
 void initialize().catch(error=>{root.textContent=`Не вдалося запустити інтерфейс: ${String(error)}. Закрий програму й відкрий її знову.`;});

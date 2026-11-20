@@ -66,7 +66,7 @@ export interface DesktopAPI {
   englishLoadAudio(key:string):Promise<{bytes:number[];mime:string}|null>;
   englishSpeech(request:import('../modules/english/types').EnglishSpeechRequest):Promise<import('../modules/english/types').EnglishSpeechAudio>;
   englishTranslate(request:{action:'lookup'|'translate'|'list';text?:string;context?:string;provider?:'complimentary'|'openrouter'|'groq'}):Promise<any>;
-  englishAI(request:{action:string;area?:string;targetKey?:string;question?:string;provider?:string;options?:Record<string,unknown>}):Promise<any>;
+  englishAI(request:{action:string;area?:string;targetKey?:string;question?:string;provider?:string;options?:Record<string,unknown>;context?:import('../modules/english/dialogue').LunaMessage[]}):Promise<any>;
   sqlAI(request:{action:'settings'|'prepare'|'test';options?:{key?:string;remove?:boolean;enabled?:boolean;fallbackEnabled?:boolean;learningBonus?:boolean}}):Promise<SQLAIStatus>;
   sqlChat(request:SQLChatRequest):Promise<SQLChatReply>;
   englishCheckLanguage(request:{key:string;attemptId?:string}):Promise<{view:import('../modules/english/types').EnglishView;report:import('../modules/english/types').EnglishLanguageReport}>;

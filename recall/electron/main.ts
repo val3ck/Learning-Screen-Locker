@@ -22,6 +22,8 @@ import * as EnglishCourse from '../src/modules/english/vendor/course';
 import * as EnglishLearning from '../src/modules/english/vendor/learning';
 import Language from '../integration/english-language.cjs';
 import {englishSpeechText} from '../src/modules/english/speech-content';
+import {dialogueKey,isLunaContext,speakingBrief} from '../src/modules/english/dialogue';
+import {speakWithLuna} from './english-dialogue';
 import {eveningSchedule,tickEvening,snoozeEvening,type EveningSchedule} from '../src/core/evening';
 import EnglishInstaller from '../integration/install-english.cjs';
 import {WarningPanel} from './warning-panel';
@@ -42,6 +44,7 @@ let focusSurface=false;
 let nodeNight:NodeNight;
 let englishHost:EnglishHost,englishNative=false,englishSchedule:EveningSchedule;
 let englishSpeech:EnglishSpeech;
+let englishDialoguePending=false;
 let languageChecker:any;let englishAI:any;let translator:any;let sqlAI:SQLAI;
 let sqlChat:SQLChat;
 let warningModule:'postgresql'|'english'='postgresql',englishOptional=false,mediaUntil=0,waitingUntil=0;
@@ -225,7 +228,14 @@ async function installHandlers(){
   handle('recall:english-audio-save',(key:string,bytes:number[],mime:string)=>englishHost.saveAudio(key,bytes,mime));
   handle('recall:english-audio-load',(key:string)=>englishHost.loadAudio(key));
   handle('recall:english-translate',async(request:any)=>translator.handle(request));
-  handle('recall:english-speech',async request=>{const l=englishHost.view().lesson,text=englishSpeechText(l,request);try{return await englishAI.voice(request.kind==='dialogue'?l.listening.dialogue:[{speaker:'Narrator',text}]);}catch{return {...await englishSpeech.synthesize(text),provider:'local',fallbackReason:'Cloud voice unavailable; local Windows voice.'};}});
+  handle('recall:english-speech',async request=>{
+    const view=englishHost.view(),l=view.lesson;
+    const text=request?.kind==='luna-reply'
+      ? view.attempt?.liveSpeaking?.messages.at(-1)?.text ?? speakingBrief(l).opening
+      : englishSpeechText(l,request);
+    try{return await englishAI.voice(request.kind==='dialogue'?l.listening.dialogue:[{speaker:'Narrator',text}]);}
+    catch{return {...await englishSpeech.synthesize(text),provider:'local',fallbackReason:'Cloud voice unavailable; local Windows voice.'};}
+  });
 
   handle('recall:english-ai',async(request:any)=>{
     if(!request||typeof request.action!=='string')throw Error('Invalid AI request.');
@@ -233,9 +243,57 @@ async function installHandlers(){
     if(request.action==='test')return englishAI.testConnection(request.provider);
     if(request.action==='models')return {models:await englishAI.models(request.provider)};
     const s=englishHost.controller.document.course.activeSession,practice=englishHost.controller.snapshot()?.payload.phase==='reinforcement';if(!s&&!practice)throw Error('Start or resume an English lesson first.');const area=request.area||(practice?'practice':s!.lesson.blocks[s!.blockIndex].id),lesson=s?.lesson||englishHost.view().lesson;
+    if(request.action==='dialogue'||request.action==='dialogue-transcribe'){
+      if(!s||!englishHost.running()||englishHost.readonly()||englishHost.controller.snapshot()?.payload.phase!=='lesson'||s.lesson.blocks[s.blockIndex]?.id!=='speaking')throw Error('Open the Speaking block first.');
+      if(englishDialoguePending)throw Error('Wait for the current conversation request.');
+      const key=dialogueKey(s.liveSpeaking),id=s.id,runId=englishHost.controller.snapshot()!.id;
+      const draft=s.answers[key]||'';
+      englishDialoguePending=true;
+      try{
+        if(request.action==='dialogue-transcribe'){
+          const audio=englishHost.loadAudio(id+':'+key);
+          if(!audio)throw Error('Record your reply first.');
+          const result=await englishAI.transcribe({audio:Buffer.from(audio.bytes).toString('base64'),mimeType:audio.mime});
+          return {text:result.transcript.text.slice(0,1200),key,attemptId:id};
+        }
+        const next=await speakWithLuna(englishAI,lesson,draft.trim(),s.liveSpeaking,demo||smoke);
+        const view=englishHost.aiChange(c=>{
+          const current=c.document.course.activeSession;
+          if(!current||current.id!==id||c.snapshot()?.id!==runId||current.lesson.blocks[current.blockIndex]?.id!=='speaking'||dialogueKey(current.liveSpeaking)!==key||current.answers[key]!==draft)throw Error('The conversation changed. Your draft is saved.');
+          c.acceptSpeakingDialogue(next);
+        });
+        return {view};
+      }finally{englishDialoguePending=false;}
+    }
     if(request.action==='transcribe'){if(!s)throw Error('Record a lesson first.');const transcripts:any={};for(const key of ['monologue','turn-0','turn-1','turn-2','retry']){const audio=englishHost.loadAudio(s.id+':'+key);if(audio){try{const r=await englishAI.transcribe({audio:Buffer.from(audio.bytes).toString('base64'),mimeType:audio.mime});transcripts[key]=r.transcript;}catch(e){transcripts[key]={text:'',error:String(e),provider:'none',confirmed:false};}}}if(!Object.keys(transcripts).length)throw Error('Record your replies first.');return {view:englishHost.aiChange(c=>{(c.document.course.activeSession as any).proposedTranscripts=transcripts;})};}
-    const items=area==='practice'?englishHost.controller.assessmentBundle('practice').answers:(EnglishLearning as any).areaItems(s,area).map((a:any)=>({...a,text:s!.answers[a.key]||''})),answers=items,bundle=AIPrompts.context(lesson,area,answers);
-    if(request.action==='hint'){const result=await englishAI.hint(Coaching.tutorContext(bundle,s||{lastAnswerKey:'practice',aiAssessments:{practice:englishHost.controller.snapshot()?.payload.practice?.aiAssessment}},request.targetKey),request.question);return {...result,view:englishHost.aiChange(c=>{const a=(c.document.course.activeSession||c.snapshot()?.payload.practice) as any;a.aiHints=[...(a.aiHints||[]),{area,...result.hint,at:new Date().toISOString()}].slice(-50);})};}
+    const practiceTask=englishHost.controller.snapshot()?.payload.practice;
+    const activeArea=practice?'practice':s?.lesson.blocks[s.blockIndex]?.id;
+    if(request.action==='hint'&&(!englishHost.running()||area!==activeArea))throw Error('Open the task you want to discuss.');
+    const items=area==='practice'
+      ? request.action==='hint'&&practiceTask?[{key:'practice',task:practiceTask.prompt,text:practiceTask.value}]:englishHost.controller.assessmentBundle('practice').answers
+      : (EnglishLearning as any).areaItems(s,area).map((a:any)=>({...a,text:s!.answers[a.key]||''}));
+    const bundle=AIPrompts.context(lesson,area,items);
+    if(request.action==='hint'){
+      if(request.context!==undefined&&!isLunaContext(request.context))throw Error('Invalid chat context.');
+      const attemptId=s?.id,runId=englishHost.controller.snapshot()?.id;
+      if(area==='speaking'&&request.targetKey===dialogueKey(s?.liveSpeaking)&&s){
+        const brief=speakingBrief(lesson),answer={key:request.targetKey,task:brief.goal+' '+brief.opening,text:s.answers[request.targetKey]||''};
+        bundle.answers=[answer];
+      }
+      const context=Coaching.tutorContext(bundle,practice?{lastAnswerKey:'practice',aiAssessments:{practice:englishHost.controller.snapshot()?.payload.practice?.aiAssessment}}:s,request.targetKey);
+      context.conversation=request.context;
+      const result=demo||smoke?{hint:{
+        clarification:'Name the exact step you want to take.',
+        hint:'Use the task to decide which detail matters most.',
+        nextStep:'Explain what you expect to observe.',
+      }}:await englishAI.hint(context,request.question);
+      return {...result,view:englishHost.aiChange(c=>{
+        if(c.snapshot()?.id!==runId||c.document.course.activeSession?.id!==attemptId)throw Error('The active lesson changed.');
+        const a=(practice?c.snapshot()?.payload.practice:c.document.course.activeSession) as any;
+        if(!a)throw Error('The task is no longer active.');
+        a.aiHints=[...(a.aiHints||[]),{area,...result.hint,at:new Date().toISOString()}].slice(-50);
+      })};
+    }
     if(request.action==='conclusion'){if(!s)throw Error('Resume your lesson first.');bundle.evidenceMode=['grammar','listening'].includes(area)&&!(s.aiAssessments as any)?.[area]?'closed-choice':'original-responses';bundle.listeningUnavailable=!!s.listeningUnavailable;const result=await englishAI.conclude(bundle,Coaching.summaryRows(bundle,s));return {...result,view:englishHost.aiChange(c=>{const current=c.document.course.activeSession;if(!current||current.id!==s.id)throw Error('The active lesson changed.');const latest=(EnglishLearning as any).areaItems(current,area).map((a:any)=>({...a,text:current.answers[a.key]||''}));Coaching.attachSummary(current,area,result.blockSummary,latest);},true)};}
     if(request.action==='grade'){
 englishHost.controller.assessmentBundle(area);const result=await englishAI.grade(bundle);await store.write('modules/english/ai-reports/'+Date.now()+'-'+area+'.json',result.assessment);return {...result,view:englishHost.aiChange(c=>c.acceptAI(result.assessment),true)};}throw Error('Unknown AI action.');

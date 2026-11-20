@@ -331,6 +331,16 @@ Circuit breakers|A circuit breaker temporarily stops calls to a failing dependen
 
   // Deep technical enrichment for every single topic in SOURCES.
   const TOPIC_INFO = {
+    'Database indexes': {
+      summary:'A database index gives PostgreSQL another way to find matching rows. The query plan shows whether it actually chose that path.',
+      ukBrief:'Індекс дає PostgreSQL додатковий шлях до потрібних рядків. На прикладі пошуку записів за email подивись, як план виконання показує спосіб читання і чому новий індекс не гарантує швидшого запиту.',
+      mechanism:'PostgreSQL can scan the appointments table and filter each row, or use an index to find matching email values first. An index is useful when the filter matches a small share of a large table. For a query that reads many rows, scanning the table may still be cheaper.',
+      steps:['Record the current search time with a representative email address.','Inspect the query plan to see where PostgreSQL reads and filters rows.','Test an index on the column used by the filter.','Compare the plans and timings on the same data, then check the effect on writes.'],
+      realWorldWhy:'Checking the plan and measuring the same search before and after the change gives the team evidence to keep or reconsider the index.',
+      misconception:'Creating an index does not guarantee that PostgreSQL will use it. It also adds storage and work when rows change.',
+      diagContext:'An index on patient_email has been added, but exact email searches still take two seconds. The team has not checked the new plan yet.',
+      workflowSituation:'After discussing the two-second email search, write a handover. Record which plan and measurement you would collect next and what result would justify keeping the index.',
+    },
     'Project introductions': {
       ukBrief: 'Коли розробник приєднується до ІТ-проєкту, головна помилка — одразу занурюватися в перелік фреймворків (React, Node.js, PostgreSQL), не розуміючи бізнес-проблеми. Справжнє онбординг-знайомство з проєктом будується зверху вниз: 1) Хто кінцеві користувачі (users) і яку їхню проблему вирішує продукт; 2) Які ключові функції (features) закривають цю потребу; 3) Як система поділена на модулі та хто є відповідальним (owner) за кожен компонент.',
       summary: 'A technical project introduction aligns engineers around the user problem, core domain workflows, and module ownership before diving into frameworks and repositories.',
@@ -568,6 +578,15 @@ Circuit breakers|A circuit breaker temporarily stops calls to a failing dependen
         {speaker:role, text:`And we still update our specification and run Stage 4 QA tests before we deploy the simplified version?`},
         {speaker:'Developer', text:`Yes! Keeping a written sprint plan and automated checks is crucial; Agile simply repeats the six SDLC stages in short loops so every release delivers real value.`}
       ];
+    } else if (card.title === 'Database indexes') {
+      turns = [
+        {speaker:role,text:'I added the index on patient_email yesterday, but looking up one patient’s appointments still takes two seconds.'},
+        {speaker:'Developer',text:'That is the same timing as before. Did you save the query plan from staging so we can see which scan it used?'},
+        {speaker:role,text:'I have the old plan. The new test used a much smaller copy of the database, so the data is not representative.'},
+        {speaker:'Developer',text:'Could we rerun the search on the same data? I want to compare what PostgreSQL reads, not just the elapsed time.'},
+        {speaker:role,text:'I can do that today. We should also check whether the index adds too much overhead to writes.'},
+        {speaker:'Developer',text:'Good. Bring both plans and the timings to stand-up. Then we can decide whether to keep the index.'},
+      ];
     } else if (card.title === 'Containers') {
       turns = [
         {speaker:role, text:`Hey, do you have a minute? The clinic API runs fine on my macOS laptop, but in the Linux staging cluster the startup failure rate is enormous.`},
@@ -635,7 +654,15 @@ Circuit breakers|A circuit breaker temporarily stops calls to a failing dependen
       turns = templates[week % templates.length];
     }
 
-    const usedSet = (card.title === 'Agile feedback' || card.title === 'Containers') ? CATCH_SETS[0] : set;
+    const indexWords = [
+      ['index','noun','індекс','A structure that helps the database find matching rows.'],
+      ['query plan','noun phrase','план виконання','The steps the database chooses to run a query.'],
+      ['scan','noun','сканування','Reading rows through a table or index.'],
+      ['representative','adjective','репрезентативний','Similar enough to real usage to make a test useful.'],
+      ['overhead','noun','додаткові витрати','Extra work or cost caused by a change.'],
+      ['timings','noun','вимірювання часу','Recorded execution times used to compare tests.'],
+    ].map(([word,pos,uk,meaning])=>({word,pos,uk,meaning}));
+    const usedSet = card.title==='Database indexes'?indexWords:(card.title === 'Agile feedback' || card.title === 'Containers') ? CATCH_SETS[0] : set;
     const catchWords = usedSet.map(item => {
       const turn = turns.find(t => t.text.toLowerCase().includes(item.word.toLowerCase())) || turns[0];
       return {
@@ -818,6 +845,7 @@ Circuit breakers|A circuit breaker temporarily stops calls to a failing dependen
       level,progressionStage:stage,targetLevel:'B2',blocks:BLOCKS.map(b=>({...b})),minutes:55,
       communication:{version:1,scene:details.workflowSituation,problem:details.diagContext,proposal:card.action,limitation:details.misconception,alternative:card.contrast[2],allowOwnScenario:true},
       concept:{
+        caseStudy:{scene:card.scene,problem:card.problem},
         explanation:card.explanation,
         summary:details.summary,
         steps:details.steps,

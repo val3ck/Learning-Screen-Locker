@@ -1,5 +1,7 @@
 import {installContextTranslator,renderTranslatorTools} from './translator-view';
-import {enhanceEnglishAnswers,focusTutorAnswer} from './answer-enhancements';
+import {enhanceEnglishAnswers} from './answer-enhancements';
+import {EnglishLunaChat} from './luna-chat';
+import type {LunaMessage} from './dialogue';
 import type {EnglishView,EnglishChoice,EnglishSpeechRequest,EnglishLanguageReport} from './types';
 import {waitForEnglishVoice} from './speech-voices';
 import {renderAISettings,getListeningRate,providerSwitchMessage} from './ai-view';
@@ -16,9 +18,14 @@ export class EnglishScreen {
   private audioUrls=new Map<string,string>();private speechToken:object|null=null;private mediaTimer:ReturnType<typeof setInterval>|null=null;private lastClock=Date.now();private recordingTimeout:ReturnType<typeof setTimeout>|null=null;
   private inspectedReports=new Map<string,EnglishLanguageReport>();
   private nativeSpeechAudio:HTMLAudioElement|null=null;private nativeSpeechUrl:string|null=null;
-  constructor(private root:HTMLElement,public state:EnglishView,private onUpdate:(state:EnglishView)=>void,private onHome:()=>void){this.aiConfig=(state as any).aiSettings;this.render();}
+  private luna:EnglishLunaChat;
+  constructor(private root:HTMLElement,public state:EnglishView,private onUpdate:(state:EnglishView)=>void,private onHome:()=>void){
+    this.aiConfig=state.aiSettings;
+    this.luna=new EnglishLunaChat(root,(area,key,question,context)=>this.askLuna(area,key,question,context));
+    this.render();
+  }
   private message(text:string){const n=this.root.querySelector<HTMLElement>('#en-notice');if(n){n.textContent=text;n.hidden=false;}}
-  render(){this.root.innerHTML=renderEnglishScreen(this.state,this.recordingKey,this.inspectedReports)+renderAISettings(this.aiConfig);if(this.state.readonly)for(const element of this.root.querySelectorAll<HTMLInputElement|HTMLTextAreaElement|HTMLButtonElement>('input,textarea,button'))if(!['open-browser','import','home','check-saved'].includes(element.dataset.enAction||''))element.disabled=true;this.root.querySelector('.en-screen')?.insertAdjacentHTML('afterbegin',renderTranslatorTools());this.bind();enhanceEnglishAnswers(this.root);installContextTranslator(this.root,request=>window.recall.englishTranslate(request));void this.restoreAudio();}
+  render(){this.root.innerHTML=renderEnglishScreen(this.state,this.recordingKey,this.inspectedReports)+renderAISettings(this.aiConfig);if(this.state.readonly)for(const element of this.root.querySelectorAll<HTMLInputElement|HTMLTextAreaElement|HTMLButtonElement>('input,textarea,button'))if(!['open-browser','import','home','check-saved'].includes(element.dataset.enAction||''))element.disabled=true;this.root.querySelector('.en-screen')?.insertAdjacentHTML('afterbegin',renderTranslatorTools());this.bind();enhanceEnglishAnswers(this.root);installContextTranslator(this.root,request=>window.recall.englishTranslate(request));this.luna.sync(this.state);const log=this.root.querySelector('.en-dialogue-log');if(log)log.scrollTop=log.scrollHeight;void this.restoreAudio();}
   private bind(){
     const speed=this.root.querySelector<HTMLSelectElement>('[data-en-listening-rate]');if(speed)speed.onchange=()=>{const rate=Number(speed.value);if(![0.75,0.85,1].includes(rate))return;try{localStorage.setItem('english-listening-rate',String(rate));}catch{}if(this.nativeSpeechAudio){this.nativeSpeechAudio.preservesPitch=true;this.nativeSpeechAudio.playbackRate=rate;}};
     const provider=this.root.querySelector<HTMLSelectElement>('#en-ai-provider');if(provider)provider.onchange=()=>{this.root.querySelector<HTMLInputElement>('#en-ai-key')!.value='';this.root.querySelector<HTMLInputElement>('#en-ai-model')!.value=this.aiConfig?.providers?.find((p:any)=>p.id===provider.value)?.model||(provider.value==='openai'?'gpt-6-luna':'');const options=this.root.querySelector('#en-ai-model-options'),models=provider.value==='openai'?['gpt-6-luna','gpt-5.4-mini','gpt-5.6-luna','gpt-5.6-terra','gpt-5.6-sol','gpt-6.1-terra','gpt-6.1-sol','gpt-6-astra']:[this.root.querySelector<HTMLInputElement>('#en-ai-model')!.value];if(options)options.innerHTML=models.map(id=>'<option value="'+esc(id)+'"></option>').join('');};
@@ -27,6 +34,21 @@ export class EnglishScreen {
   }
   private async flush(){if(this.timer)clearTimeout(this.timer);this.timer=null;const entries=[...this.pending];this.pending.clear();for(const [key,value]of entries){const next=await window.recall.englishAction({type:'answer',key,value});this.state=next;this.onUpdate(next);} }
   private run(work:()=>Promise<void>){this.queue=this.queue.then(work).catch(error=>this.message(String(error).replace(/^Error: /,'')));return this.queue;}
+  private askLuna(area:string,key:string,question:string,context:LunaMessage[]):Promise<string>{
+    const work=this.queue.then(async()=>{
+      await this.flush();
+      const activeArea=this.state.run?.payload.phase==='reinforcement'?'practice':this.state.lesson.blocks[this.state.attempt?.blockIndex??-1]?.id;
+      if(area!==activeArea||this.state.run?.status!=='active')throw Error('Open that task again to ask Luna.');
+      await this.stopRecording();this.stopSpeech();this.heartbeat('waiting');
+      try{
+        const result=await window.recall.englishAI({action:'hint',area,targetKey:key,question,context});
+        this.state=result.view;this.onUpdate(this.state);await this.flush();
+        return [result.hint.clarification,result.hint.hint,result.hint.nextStep].filter(Boolean).join('\n\n');
+      }finally{this.stopHeartbeat();}
+    });
+    this.queue=work.catch(()=>{});
+    return work;
+  }
   private async send(action:LearningAction){this.state=await window.recall.englishAction(action);this.onUpdate(this.state);this.render();}
   private async checkLanguage(key:string,attemptId?:string){
     await this.stopRecording();this.stopSpeech();await this.flush();this.message('Checking your English locally…');this.heartbeat('waiting');
@@ -35,13 +57,31 @@ export class EnglishScreen {
   }
   private async dispatch(type:string,button:HTMLButtonElement){
     await this.flush();
-    if(type==='coach-answer'){focusTutorAnswer(this.root,button.dataset.key!,button.dataset.question);return;}
+    if(type==='dialogue'||type==='dialogue-transcribe'){
+      if(button.disabled)return;
+      button.disabled=true;
+      const field=this.root.querySelector<HTMLTextAreaElement>('#en-live-reply');
+      if(field)field.readOnly=true;
+      await this.stopRecording();this.stopSpeech();this.heartbeat('waiting');
+      try{
+        const result=await window.recall.englishAI({action:type});
+        if(type==='dialogue-transcribe'){
+          if(this.state.attempt?.id!==result.attemptId||this.root.querySelector<HTMLTextAreaElement>('#en-live-reply')?.dataset.enAnswer!==result.key)throw Error('The Speaking turn changed.');
+          await this.send({type:'answer',key:result.key,value:result.text,flag:true});
+          this.message('Transcript added. Read and edit it before sending.');
+        }else{
+          this.state=result.view;this.onUpdate(this.state);this.render();
+          this.root.querySelector<HTMLTextAreaElement>('#en-live-reply')?.focus({preventScroll:true});
+        }
+      }finally{button.disabled=false;if(field)field.readOnly=false;this.stopHeartbeat();}
+      return;
+    }
     if(type.startsWith('ai-')){this.aiPending=true;for(const b of this.root.querySelectorAll<HTMLButtonElement>('[data-en-action^="ai-"]'))b.disabled=true;this.message('Working with your configured providers… Your draft is saved.');try{await this.stopRecording();this.stopSpeech();this.heartbeat('waiting');
       if(type==='ai-save'){const result=await window.recall.englishAI({action:'settings',options:{provider:this.root.querySelector<HTMLSelectElement>('#en-ai-provider')!.value,key:this.root.querySelector<HTMLInputElement>('#en-ai-key')!.value,model:this.root.querySelector<HTMLInputElement>('#en-ai-model')!.value,order:this.root.querySelector<HTMLSelectElement>('#en-ai-order')!.value.split(','),hybridRouting:this.root.querySelector<HTMLInputElement>('#en-ai-hybrid')!.checked,complimentaryEnrolled:this.root.querySelector<HTMLInputElement>('#en-ai-enrolled')!.checked,openaiRegularModel:this.root.querySelector<HTMLInputElement>('#en-ai-regular-model')!.value,openaiHeavyModel:this.root.querySelector<HTMLInputElement>('#en-ai-heavy-model')!.value,openaiMiniBudget:Number(this.root.querySelector<HTMLInputElement>('#en-ai-mini-budget')!.value),openaiStandardBudget:Number(this.root.querySelector<HTMLInputElement>('#en-ai-standard-budget')!.value),automaticFallback:this.root.querySelector<HTMLInputElement>('#en-ai-fallback')!.checked,cloudVoice:this.root.querySelector<HTMLInputElement>('#en-ai-cloud')!.checked,translationGroqFreeConfirmed:this.root.querySelector<HTMLInputElement>('#en-translation-groq-free')!.checked}});this.aiConfig=result.settings;this.render();this.message('Ключ і налаштування збережено. Натисни «Перевірити підключення», щоб перевірити реальну відповідь API.');}
       else if(type==='ai-test'){if(this.root.querySelector<HTMLInputElement>('#en-ai-key')!.value.trim())throw Error('Спочатку збережи новий ключ.');const result=await window.recall.englishAI({action:'test',provider:this.root.querySelector<HTMLSelectElement>('#en-ai-provider')!.value});this.aiConfig=result.settings;this.render();const details=this.root.querySelector<HTMLDetailsElement>('#en-ai-settings > details');if(details)details.open=true;this.message(result.connection.ok?'✓ API працює. Моделі відповіли без резервного переключення.':'API не пройшов перевірку. Причина показана в налаштуваннях.');}
       else if(type==='ai-status'){this.aiConfig=(await window.recall.englishAI({action:'settings'})).settings;this.render();}
       else if(type==='ai-models'){const result=await window.recall.englishAI({action:'models',provider:this.root.querySelector<HTMLSelectElement>('#en-ai-provider')!.value});this.root.querySelector('#en-ai-models')!.textContent=result.models.join('\n');const options=this.root.querySelector('#en-ai-model-options');if(options)options.innerHTML=result.models.map((id:string)=>'<option value="'+esc(id)+'"></option>').join('');}
-      else {const area=button.dataset.area,result=await window.recall.englishAI({action:type==='ai-grade'?'grade':type==='ai-hint'?'hint':type==='ai-conclusion'?'conclusion':'transcribe',area,targetKey:this.root.querySelector<HTMLSelectElement>('[data-en-hint-target]')?.value,question:this.root.querySelector<HTMLTextAreaElement>('[data-en-hint-question]')?.value?.trim()||'Help me improve my saved answer using its feedback. Explain one change without writing the answer for me.'});this.state=result.view;this.onUpdate(this.state);await this.flush();this.render();const notice=providerSwitchMessage(result,type==='ai-transcribe'?'transcribe':undefined);if(notice)this.message(notice);}
+      else {const area=button.dataset.area,result=await window.recall.englishAI({action:type==='ai-grade'?'grade':type==='ai-conclusion'?'conclusion':'transcribe',area});this.state=result.view;this.onUpdate(this.state);await this.flush();this.render();const notice=providerSwitchMessage(result,type==='ai-transcribe'?'transcribe':undefined);if(notice)this.message(notice);}
     }finally{this.aiPending=false;for(const b of this.root.querySelectorAll<HTMLButtonElement>('[data-en-action^="ai-"]'))b.disabled=false;this.stopHeartbeat();}return;}
     if(type==='copy-coaching'){const field=button.closest('.en-coaching-tools')?.querySelector<HTMLTextAreaElement>('[data-en-coaching-prompt]');if(!field)throw new Error('Немає готового промпта.');try{await navigator.clipboard.writeText(field.value);this.message('Промпт скопійовано. Він містить твої навчальні відповіді; ключів у ньому немає.');}catch{field.focus();field.select();this.message('Промпт виділено. Натисни Ctrl+C.');}return;}
     if(type==='import-personal-review'){const value=this.root.querySelector<HTMLTextAreaElement>('[data-en-personal-review]')?.value||'';await this.send({type:'import-personal-review',value});this.message('Вправи додано в повторення на наступний навчальний день.');return;}
@@ -58,6 +98,7 @@ export class EnglishScreen {
     if(type==='surrender'){await this.stopRecording();this.stopSpeech();this.state=await window.recall.englishFinish('surrendered');this.onUpdate(this.state);this.render();return;}
     if(type==='record'){await this.record(button.dataset.key!);return;}
     if(type==='listen'){await this.listen();return;}
+    if(type==='luna-say'){await this.speak({kind:'luna-reply'},[]);return;}
     if(type==='stop-speech'){this.stopSpeech();return;}
     if(type==='speak-word'){const index=Number(button.dataset.index);await this.speak({kind:'word',index},[this.state.lesson.vocabulary[index].en]);return;}
     if(type==='speak-catch-word'){const index=Number(button.dataset.index),word=this.state.lesson.listening.catchWords?.[index]?.word;if(word)await this.speak({kind:'catch-word',index},[word]);return;}
@@ -93,6 +134,6 @@ export class EnglishScreen {
     recorder.onerror=()=>{void this.stopRecording();this.message('Recording stopped. You can type your reply.');};recorder.start(250);this.recordingTimeout=setTimeout(()=>void this.stopRecording(),180000);this.heartbeat('recording');this.render();
   }
   private async stopRecording(){if(this.recordingTimeout)clearTimeout(this.recordingTimeout);this.recordingTimeout=null;if(this.recorder&&this.recorder.state!=='inactive')this.recorder.stop();if(this.recordingDone){await this.recordingDone;this.recordingDone=null;}}
-  private async restoreAudio(){const attempt=this.state.attempt;if(!attempt)return;for(const box of this.root.querySelectorAll<HTMLElement>('[data-en-audio]')){const id=attempt.id+':'+box.dataset.enAudio;let url=this.audioUrls.get(id);if(!url)try{const saved=await window.recall.englishLoadAudio(id);if(saved){url=URL.createObjectURL(new Blob([new Uint8Array(saved.bytes)],{type:saved.mime}));this.audioUrls.set(id,url);}}catch{}if(url&&box.isConnected){const audio=document.createElement('audio');audio.controls=true;audio.preload='metadata';audio.src=url;audio.onplay=()=>this.heartbeat('playback');audio.onpause=audio.onended=()=>this.stopHeartbeat();box.replaceChildren(audio);}}}
-  dispose(){if(this.timer)clearTimeout(this.timer);this.stopSpeech();void this.stopRecording();for(const url of this.audioUrls.values())URL.revokeObjectURL(url);this.audioUrls.clear();}
+  private async restoreAudio(){const attempt=this.state.attempt;if(!attempt)return;for(const box of this.root.querySelectorAll<HTMLElement>('[data-en-audio]')){const id=attempt.id+':'+box.dataset.enAudio;let url=this.audioUrls.get(id);if(!url)try{const saved=await window.recall.englishLoadAudio(id);if(saved){url=URL.createObjectURL(new Blob([new Uint8Array(saved.bytes)],{type:saved.mime}));this.audioUrls.set(id,url);}}catch{}if(url&&box.isConnected){const audio=document.createElement('audio');audio.controls=true;audio.preload='metadata';audio.src=url;audio.onplay=()=>this.heartbeat('playback');audio.onpause=audio.onended=()=>this.stopHeartbeat();box.replaceChildren(audio);if(box.dataset.enAudio?.startsWith('live-speaking-')){const transcribe=this.root.querySelector<HTMLButtonElement>('[data-en-action=dialogue-transcribe]');if(transcribe)transcribe.hidden=false;}}}}
+  dispose(){this.luna.dispose();if(this.timer)clearTimeout(this.timer);this.stopSpeech();void this.stopRecording();for(const url of this.audioUrls.values())URL.revokeObjectURL(url);this.audioUrls.clear();}
 }

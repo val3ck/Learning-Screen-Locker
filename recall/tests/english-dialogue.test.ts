@@ -1,0 +1,56 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {EnglishController, newEnglishDocument, validateEnglishDocument} from '../src/modules/english/controller';
+import {isLunaContext, speakingBrief, topicConnection, type SpeakingDialogue} from '../src/modules/english/dialogue';
+import {speakWithLuna} from '../electron/english-dialogue';
+import * as Course from '../src/modules/english/vendor/course';
+import type {EnglishLesson} from '../src/modules/english/types';
+
+test('Luna asks for clarity, follows the learner’s reply, and needs two clear turns to close',async()=>{
+  const lesson=Course.getLesson('daily-030') as EnglishLesson;
+  assert.match(speakingBrief(lesson).opening,/two seconds/);
+  assert.match(topicConnection(lesson),/filtered rows/);
+  assert.ok((Course.lessons as EnglishLesson[]).every(l=>topicConnection(l)));
+  const pagination=Course.getLesson('daily-033') as EnglishLesson;
+  assert.match(speakingBrief(pagination).facts,/appointment history/);
+  assert.match(speakingBrief(pagination).facts,/offset pages/);
+  let next={status:'clarify',reply:'Which search are you referring to?',feedback:'I could not tell which search you meant.'};
+  let sent:any;
+  const config={};
+  const ai={config:()=>config,requestConfig:()=>config,chain:(work:any)=>work('openai',config),generate:async(_id:string,prompt:any)=>{sent=JSON.parse(prompt.user);return next;}};
+  let state=await speakWithLuna(ai,lesson,'Random unrelated words.');
+  assert.equal(state.clearReplies,0);
+  assert.equal(state.status,'clarify');
+  next={status:'ready',reply:'Done.',feedback:'Looks good.'};
+  await assert.rejects(()=>speakWithLuna(ai,lesson,'I would check the plan.',state),/incomplete/);
+  next={status:'continue',reply:'What would you look for in that plan?',feedback:'Checking the plan is a relevant first step.'};
+  state=await speakWithLuna(ai,lesson,'I would check the plan.',state);
+  assert.equal(sent.messages.at(-1).text,'I would check the plan.');
+  assert.equal(sent.readyAllowed,false);
+  next={status:'ready',reply:'Thanks, let’s compare the results.',feedback:'You named a signal and a comparable measurement.'};
+  state=await speakWithLuna(ai,lesson,'I would check whether it scans the table and compare timings with the same data.',state);
+  assert.equal(sent.readyAllowed,true);
+  assert.equal(state.status,'ready');
+  assert.equal(state.clearReplies,2);
+  assert.equal(state.messages.length,5);
+  assert.ok(isLunaContext(sent.messages));
+  assert.equal(Object.hasOwn(state,'score'),false);
+});
+
+test('Saved Speaking conversations resume and only a completed dialogue opens Writing',()=>{
+  const now=new Date('2026-11-20T19:00:00+02:00');
+  const c=new EnglishController(newEnglishDocument(now),()=>now);
+  c.start();
+  const attempt=c.document.course.activeSession!;
+  attempt.blockIndex=5;
+  assert.equal(attempt.lesson.blocks[attempt.blockIndex].id,'speaking');
+  const partial:SpeakingDialogue={turn:1,status:'continue',clearReplies:1,messages:[{role:'assistant',text:'What would you check?'}],feedback:'Name a specific signal.'};
+  attempt.liveSpeaking=partial;
+  assert.equal(c.view().canAdvance,false);
+  const restored=new EnglishController(validateEnglishDocument(c.document),()=>now);
+  assert.deepEqual(restored.view().attempt?.liveSpeaking,partial);
+  restored.acceptSpeakingDialogue({...partial,turn:2,clearReplies:2,status:'ready'});
+  assert.equal(restored.view().canAdvance,true);
+  restored.dispatch({type:'advance'});
+  assert.equal(restored.view().lesson.blocks[restored.view().attempt!.blockIndex].id,'writing');
+});

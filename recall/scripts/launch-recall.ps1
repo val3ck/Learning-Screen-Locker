@@ -18,7 +18,7 @@ if (-not $PrintTarget -and (Test-Path -LiteralPath $pendingArchive -PathType Lea
     }
 }
 
-$relativePaths = @('release\win-unpacked\SQL Recall.exe', 'release\english-task-cards\win-unpacked\SQL Recall.exe')
+$relativePaths = @('release-english-live\win-unpacked\SQL Recall.exe', 'release\win-unpacked\SQL Recall.exe', 'release\english-task-cards\win-unpacked\SQL Recall.exe')
 $candidates = foreach ($relative in $relativePaths) {
     $exe = Join-Path $recallRoot $relative
     $archive = Join-Path (Split-Path -Parent $exe) 'resources\app.asar'
