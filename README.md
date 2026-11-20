@@ -1,4 +1,6 @@
-# Recall Learning Suite
+# VIBECODED
+
+## Recall Learning Suite
 
 Локальний навчальний потік для Windows. SQL Recall відкриває практику з PostgreSQL, English Daily і нічний Node.js. Поруч є повні тренажери для SQL і Node.js та окремий English-сайт для допрацювання матеріалу.
 
