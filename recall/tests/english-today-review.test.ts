@@ -11,19 +11,19 @@ test('A +30 minute extension resumes the same lesson and saves a separate active
  controller.dispatch({type:'answer',key:'vocab-0',value:'Our feature saves time.'});
  const daily=controller.snapshot()!;
  controller.day().activeMs=ENGLISH_TARGET_MS-1000;
- controller.tick(1000,{active:true});
+ controller.tick(1000,{active:true});controller.dispatch({type:'save-and-exit'});
  assert.ok(controller.view().canExtend);
- assert.match(renderEnglishScreen(controller.view(),'',new Map()),/Допрацювати \+30 хв/);
+ assert.match(renderEnglishScreen(controller.view(),'',new Map()),/Practise for 30 more minutes/);
 
  controller.startExtension();
  const extra=controller.snapshot()!;
  assert.notEqual(extra.id,daily.id);
  assert.equal(extra.payload.extraPractice,true);
  assert.equal(controller.document.course.activeSession?.id,attempt.id);
- assert.equal(controller.document.course.activeSession?.blockIndex,1);
+ assert.equal(controller.document.course.activeSession?.blockIndex,0);
  assert.equal(controller.document.course.activeSession?.answers['vocab-0'],'Our feature saves time.');
  const screen=renderEnglishScreen(controller.view(),'',new Map());
- assert.match(screen,/0:00 \/ 30:00/);assert.match(screen,/Вийти й зберегти/);
+ assert.match(screen,/0:00 \/ 30:00/);assert.match(screen,/Save and exit/);
  controller.tick(5000,{active:false});controller.tick(5000,{active:true,waiting:true});
  assert.equal(extra.activeMs,0);
  controller.tick(5000,{active:true});controller.pause();
@@ -44,7 +44,7 @@ test('A +30 minute extension resumes the same lesson and saves a separate active
 test('An extension finishes at the Kyiv learning-day boundary with work preserved',()=>{
  let now=new Date('2026-11-18T23:00:00Z');
  const controller=new EnglishController(newEnglishDocument(now),()=>now);
- controller.start();controller.day().activeMs=ENGLISH_TARGET_MS-1000;controller.tick(1000,{active:true});controller.startExtension();
+ controller.start();controller.day().activeMs=ENGLISH_TARGET_MS-1000;controller.tick(1000,{active:true});controller.dispatch({type:'save-and-exit'});controller.startExtension();
  const attempt=controller.document.course.activeSession!;
  controller.tick(1000,{active:true});
  now=new Date('2026-11-19T03:00:00Z');controller.tick(5000,{active:true});

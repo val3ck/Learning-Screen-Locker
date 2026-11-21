@@ -19,8 +19,9 @@ function settings(state) {
 void action(async () => {
   const state = await api.state();
   if (document.body.dataset.screen === 'invitation') {
+    description.textContent = 'Продовжити Backend Path · до '+state.durationMinutes+' хв';
     if (state.demo) {
-      description.textContent = 'Демо · до 40 хв · без вимкнення ПК';
+      description.textContent = 'Демо · до '+state.durationMinutes+' хв · без вимкнення ПК';
       document.querySelector('#sleep').textContent = 'Спати · демо';
     }
     document.querySelector('#learn').onclick = () => void action(() => api.choose('learn'));

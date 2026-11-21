@@ -20,7 +20,7 @@ test('A 413 causes smaller grading requests and a later failure preserves alread
   if(failLast&&work.answers[0].key==='review-3')return new Response('{}',{status:503});
   return Response.json({choices:[{message:{content:JSON.stringify(reply(work))}}]});
  };
- await assert.rejects(ai.grade(base),/Збережено перевірку 3 із 4/);
+ await assert.rejects(ai.grade(base),/Saved feedback for 3 of 4/);
  assert.deepEqual(sizes,[2,1,1,2,1,1]);
  failLast=false;requested.length=0;
  const result=await ai.grade(base);
@@ -32,7 +32,7 @@ test('Failure messages distinguish malformed model output, payload limits and a 
  const ai=fixture();for(const provider of ['openai','groq','gemini'])ai.save({provider,key:'mock'});
  ai.fetch=async(url:string)=>url.includes('groq')?new Response('{}',{status:413}):url.includes('googleapis')?
   new Response('{}',{status:503}):Response.json({output:[{type:'message',content:[{type:'output_text',text:'{truncated'}]}]});
- await assert.rejects(ai.grade(bundle()),(error:Error)=>/пошкоджений JSON/.test(error.message)&&/ліміт розміру/.test(error.message)&&/gemini: API тимчасово недоступний/.test(error.message));
+ await assert.rejects(ai.grade(bundle()),(error:Error)=>/invalid JSON/.test(error.message)&&/payload limit/.test(error.message)&&/gemini: API temporarily unavailable/.test(error.message));
 });
 
 test('Luna gets one repair attempt for a rejected grading rubric before fallback',async()=>{

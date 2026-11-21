@@ -1,4 +1,6 @@
-export const NIGHT_LIMIT = 40 * 60_000;
+import {defaultDuration,minuteMs} from './tracks';
+
+export const NIGHT_LIMIT = defaultDuration('nodejs') * minuteMs;
 const SAVE_BUFFER = 5 * 60_000;
 export type NightSection = 'lecture' | 'practice' | 'check';
 export interface NightStep {

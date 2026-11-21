@@ -6,7 +6,7 @@ export const english:LearningModule={
   controller:{restore:(state,now)=>new EnglishController(state,now)},
   catalog:Course.lessons.map((l:any)=>({id:l.id,title:l.title,chapter:l.week,prerequisites:l.prerequisites})),
   progressAdapter:{parse(source){const state=importEnglishCourse(source).course;return {version:1,moduleId:'english',catalogVersion:Course.VERSION,confirmedTopicIds:state.sessions.map(s=>s.lessonId),practiceTopicIds:[],completedSourceIds:state.sessions.map(s=>s.lessonId),syncedAt:new Date().toISOString()};}},
-  taskProvider:{generate(){throw new Error('English використовує контролер уроку.');},solution(){return '';}},
-  runner:{create(){throw new Error('English не використовує SQL-рушій.');}},
-  presentation:{language:'text',answerLabel:'Твоя відповідь',contextLabel:'Матеріали уроку'}
+  taskProvider:{generate(){throw new Error('English uses the lesson controller.');},solution(){return '';}},
+  runner:{create(){throw new Error('English runs in the English module.');}},
+  presentation:{language:'text',answerLabel:'Your answer',contextLabel:'Lesson materials'}
 };

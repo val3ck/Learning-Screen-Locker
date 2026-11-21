@@ -30,19 +30,54 @@ test('English: усі 84 уроки проходять контролер і з�
   assert.equal(Course.lessons.length,84);
   for(const lesson of Course.lessons as unknown as EnglishLesson[]){const {c}=fixture();const s=c.document.course.activeSession!;s.lesson=structuredClone(lesson);s.lessonId=s.lesson.id;c.snapshot()!.payload.lessonId=s.lessonId;
     const hydrated=new EnglishController(c.document,()=>at());completeLesson(hydrated);assert.equal(hydrated.document.course.sessions.length,1);assert.equal(hydrated.document.course.xp,100);assert.equal(hydrated.snapshot()!.payload.phase,'reinforcement');assert.equal(hydrated.document.course.sessions[0].listeningUnavailable,true);
-    assert.throws(()=>hydrated.finish('completed'));validateEnglishDocument(hydrated.document);
+    hydrated.finish('completed');assert.equal(hydrated.snapshot()!.status,'completed');validateEnglishDocument(hydrated.document);
   }
 });
 test('English: own answers require AI assessment; self-report cannot bypass it',()=>{const {c}=fixture();c.document.course.activeSession!.blockIndex=6;answer(c,'writing','My own reasoned opinion.');assert.throws(()=>c.dispatch({type:'advance'}));assert.throws(()=>self(c,'writing-check-0'));assess(c,'writing');assert.equal(c.view().canAdvance,true);answer(c,'writing','Edited opinion.');assert.equal(c.view().canAdvance,false);});
 
-test('English: швидкий урок продовжується до 55 хв; перерва та неактивність не додають часу',()=>{
-  const {c}=fixture();completeLesson(c);credit(c,35*60000);assert.equal(c.view().day.activeMs,35*60000);assert.equal(c.snapshot()!.status,'active');assert.throws(()=>c.finish('completed'));
-  const xp=c.document.course.xp;credit(c,10*60000,false);assert.equal(c.view().day.activeMs,35*60000);credit(c,20*60000);assert.equal(c.snapshot()!.status,'completed');assert.equal(c.view().day.fulfilled,true);assert.equal(c.document.course.xp,xp);
+test('English: at most three short reviews, even if the last crosses 55 minutes',()=>{
+  const {c}=fixture();credit(c,35*60000);completeLesson(c);
+  credit(c,10*60000,false);assert.equal(c.day().activeMs,35*60000);
+  credit(c,20*60000);assert.equal(c.snapshot()!.status,'active');
+  const ids=new Set();
+  for(let i=0;i<3;i++){
+    const p=c.snapshot()!.payload.practice!;ids.add(p.id);
+    c.dispatch({type:'answer',key:'practice',value:p.kind==='choice'?String(p.correct):p.answer});
+    c.dispatch({type:'check',key:'practice'});c.dispatch({type:'practice-next'});
+  }
+  assert.equal(ids.size,3);assert.equal(c.snapshot()!.status,'completed');assert.equal(c.day().fulfilled,true);
+  assert.equal(c.document.course.xp,100);assert.equal(c.snapshot()!.payload.practice,null);
   const paused=fixture().c;paused.snapshot()!.payload.phase='break';paused.snapshot()!.payload.breakRemainingMs=300000;credit(paused,300000);assert.equal(paused.day().activeMs,0);assert.equal(paused.snapshot()!.payload.phase,'lesson');
 });
-test('English: здача після 15 хв і частковий урок після 55 зберігаються на наступний день',()=>{
+test('English: 55 minutes allow only the current unfinished block and save the next unfinished block',()=>{
   const first=fixture();answer(first.c,'review-0','Saved answer');credit(first.c,15*60000-1);assert.throws(()=>first.c.finish('surrendered'));credit(first.c,1);first.c.finish('surrendered');assert.equal(first.c.day().dismissed,true);first.nextDay();first.c.start();assert.equal(first.c.day().activeMs,0);assert.equal(first.c.view().attempt!.answers['review-0'],'Saved answer');
-  const second=fixture();answer(second.c,'review-0','Keep this draft');credit(second.c,ENGLISH_TARGET_MS);assert.equal(second.c.snapshot()!.status,'partial');assert.equal(second.c.document.course.sessions.length,0);second.nextDay();second.c.start();assert.equal(second.c.view().attempt!.answers['review-0'],'Keep this draft');assert.equal(second.c.day().activeMs,0);
+  const second=fixture();const c=second.c;answer(c,'review-0','Saved overtime draft');
+  credit(c,ENGLISH_TARGET_MS);assert.equal(c.snapshot()!.status,'active');assert.equal(c.snapshot()!.payload.overtimeBlock,0);
+  assert.throws(()=>c.dispatch({type:'select-block',value:'2'}));assert.equal(c.view().canFinish,true);
+  for(let i=0;i<c.view().attempt!.reviews.length;i++)answer(c,'review-'+i,'I use this idea in a situation at work.');
+  assess(c,'review');assert.equal(c.snapshot()!.status,'partial');assert.equal(c.view().attempt!.blockIndex,1);
+  second.nextDay();c.start('daily');assert.equal(c.view().attempt!.blockIndex,1);assert.equal(c.day().activeMs,0);
+  assert.equal(c.view().attempt!.answers['review-0'],'I use this idea in a situation at work.');
+});
+test('English: a ready block closes at the boundary and completed reinforcement can finish early',()=>{
+  const {c}=fixture();
+  for(let i=0;i<c.view().attempt!.reviews.length;i++)answer(c,'review-'+i,'I use this idea in a situation at work.');
+  assess(c,'review');credit(c,ENGLISH_TARGET_MS);
+  assert.equal(c.snapshot()!.status,'partial');assert.equal(c.view().attempt!.blockIndex,1);
+  const early=fixture().c;completeLesson(early);early.dispatch({type:'save-and-exit'});
+  assert.equal(early.snapshot()!.status,'completed');assert.equal(early.day().fulfilled,true);
+});
+test('English: resuming an older attempt parks the course bookmark and preserves both drafts',()=>{
+  const {c}=fixture(),original=c.view().attempt!;
+  answer(c,'review-0','This stays in lesson one.');
+  c.pause();(c as any).engine.advanceByRequest();c.snapshot()!.endedAt=at().toISOString();c.start();
+  const next=c.view().attempt!;assert.notEqual(next.lessonId,original.lessonId);
+  answer(c,'review-0','This stays in lesson two.');c.pause();c.startSavedLesson(original.lessonId,'practice');
+  assert.equal(c.view().attempt!.id,original.id);assert.equal(c.view().attempt!.answers['review-0'],'This stays in lesson one.');
+  answer(c,'review-0','New draft for lesson one.');c.dispatch({type:'save-and-exit'});
+  assert.equal(c.view().attempt!.id,next.id);assert.equal(c.view().attempt!.answers['review-0'],'This stays in lesson two.');
+  const restored=new EnglishController(validateEnglishDocument(c.document),()=>at());
+  assert.equal(restored.view().savedWork?.find(a=>a.id===original.id)?.answers['review-0'],'New draft for lesson one.');
 });
 test('English: календар Києва 05:00 і монотонний годинник не зараховують сон',()=>{
   assert.equal(kyivDayKey(new Date('2026-11-15T02:59:00Z')),'2026-11-14');assert.equal(kyivDayKey(new Date('2026-11-15T03:00:00Z')),'2026-11-15');

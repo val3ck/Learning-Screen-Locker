@@ -1,5 +1,6 @@
 import type {Attempt,ExecutionResult,LearningModule,ModuleState,SessionRecord,Task} from './contracts';
 import {daysAfter} from './calendar';
+import {defaultDuration,minuteMs} from './tracks';
 export const INTERVALS=[1,3,7,14,30];
 export function availableTopicIds(state:ModuleState):string[]{
   return [...new Set([...(state.progress?.confirmedTopicIds||[]),...(state.learnedTopicIds||[])])];
@@ -32,7 +33,10 @@ export function addSpeedBonus(module:LearningModule,state:ModuleState,sessions:S
   session.baseTaskCount??=3;session.tasks.push(task);session.answers.push(task.starter);session.hintLevels.push(0);session.solved.push(false);session.taskElapsedMs.push(0);session.currentIndex=session.tasks.length-1;
   return true;
 }
-export function canSurrender(session:SessionRecord):boolean{return session.activeMs>=15*60000;}
+export function sqlDuration(session:Pick<SessionRecord,'durationMinutes'>):number {
+  return session.durationMinutes??defaultDuration('postgresql');
+}
+export function canSurrender(session:SessionRecord):boolean{return session.activeMs>=sqlDuration(session)*minuteMs;}
 export function surrenderMessage(session:SessionRecord):string|null{return canSurrender(session)&&session.currentIndex<session.tasks.length-1?'Можна завершити на сьогодні. Виконані вправи збережуться, до решти повернемося іншим разом.':null;}
 export function recordAttempt(session:SessionRecord,result:ExecutionResult,check:boolean,now=new Date()):void {
   const i=session.currentIndex;const task=session.tasks[i];

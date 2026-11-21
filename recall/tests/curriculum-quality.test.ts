@@ -153,5 +153,5 @@ test('Listening requires 1 listen and all 7 blocks support open AI grading and u
   assert.equal(listeningStatus?.done, true, 'Listening block must be marked done with 1 listen + AI assessment');
   assert.equal(grammarStatus?.done, true, 'Grammar block must be marked done with AI assessment');
   assert.ok(session.mistakeLog.length >= 2, 'Mistakes from listening and grammar must be logged to session.mistakeLog');
-  assert.ok(view.advanceBlocker && /Щоб перейти далі/.test(view.advanceBlocker), 'Active Review block must expose a clear Ukrainian advanceBlocker when unfinished');
+  assert.match(view.advanceBlocker || '', /Fill in the answers.*Check new or edited answers/, 'Unfinished Review shows how to proceed in English');
 });

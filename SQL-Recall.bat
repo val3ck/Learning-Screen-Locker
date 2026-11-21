@@ -9,8 +9,12 @@ goto build
 call npm run install:apps
 if errorlevel 1 exit /b 1
 :build
-if not exist "nodejs\dist-server\recall.cjs" goto package
+if not exist "nodejs\dist-server\recall.cjs" (
+  call npm --prefix nodejs run build
+  if errorlevel 1 exit /b 1
+)
 if exist "recall\release\win-unpacked\SQL Recall.exe" goto start
+for /d %%R in ("recall\release-local-*") do if exist "%%~fR\release-ready.json" goto start
 :package
 call npm run package:win
 if errorlevel 1 exit /b 1

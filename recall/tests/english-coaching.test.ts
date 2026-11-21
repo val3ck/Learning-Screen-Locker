@@ -18,21 +18,134 @@ test('Whole-section AI conclusions include cached answers when only one response
 test('Feedback uses score bands, a single explanation, checked draft, and no premature whole-lesson prompt',()=>{
  assert.equal(scoreTone(25),'low');assert.equal(scoreTone(65),'medium');assert.equal(scoreTone(85),'high');assert.equal(scoreTone(100),'perfect');
  const c=new EnglishController(newEnglishDocument());c.start();const s:any=c.document.course.activeSession;s.blockIndex=1;s.answers['vocab-0']='The feature saves time.';s.aiAssessments={vocabulary:{score:65,passed:false,provider:'mock',model:'test',checkedAt:new Date().toISOString(),snapshot:JSON.stringify([['vocab-0',s.answers['vocab-0']]]),answers:[{key:'vocab-0',score:65,passed:true,relevance:'on_task',scores:{task:4,grammar:2,vocabulary:3,clarity:2,coherence:2},summary:'The idea is understandable.',strengths:[],corrections:[{kind:'error',original:'feature',replacement:'feature',explanation:'A test explanation.'}],nextStep:'Check the verb.'}],conclusion:{version:1,total:1,passed:1,strengths:[],priorities:[]}}};
- const html=renderAIBlock(c.view(),'');assert.match(html,/en-score-medium/);assert.match(html,/Actual answer/);assert.ok(!html.includes('Explanation &amp; corrections'));assert.ok(!html.includes('data-en-coaching-prompt'));assert.match(html,/data-en-autosize="short"/);assert.ok(html.indexOf('en-ai-tutor')>html.indexOf('data-en-answer="vocab-0"'));assert.ok(html.indexOf('en-ai-tutor')<html.indexOf('en-section-results'));
+ const html=renderAIBlock(c.view(),'');assert.match(html,/en-score-medium/);assert.match(html,/Actual answer/);assert.ok(!html.includes('Explanation &amp; corrections'));assert.ok(!html.includes('data-en-coaching-prompt'));assert.match(html,/data-en-autosize="short"/);assert.match(html,/en-section-results/);assert.ok(!html.includes('en-ai-tutor'));
 });
 test('Local translations select contextual senses, save the dictionary and never call an API',async()=>{
  const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}});ai.generate=async()=>{throw Error('No API calls allowed');};const t=new Translation.EnglishTranslation({root:ai.root,ai,glossary:[]});
- const r=await t.handle({action:'lookup',text:'book',context:'Patients can book an appointment.'});assert.match(r.entry.translation,/бронювати/);assert.equal(r.entry.alternatives.length,2);assert.equal((await t.handle({action:'lookup',text:'book',context:'I read a book in the library.'})).entry.translation,'книжка');assert.equal((await t.handle({action:'lookup',text:'book',context:'Patients can book an appointment.'})).cached,true);assert.equal((await t.handle({action:'list'})).entries.length,2);
+ const r=await t.handle({action:'lookup',text:'book',context:'Patients can book an appointment.'});assert.match(r.entry.translation,/бронювати/);assert.equal(r.entry.alternatives.length,2);assert.equal((await t.handle({action:'lookup',text:'book',context:'I read a book in the library.'})).entry.translation,'книжка');assert.equal((await t.handle({action:'lookup',text:'BOOK',context:'Patients can BOOK an appointment.'})).cached,true);
+ const saved=await t.handle({action:'list'});
+ assert.equal(saved.status.count,1);
+ assert.equal(saved.entries.length,1);
+ assert.deepEqual(new Set(saved.entries[0].uses.map((use:{translation:string})=>use.translation)),new Set(['бронювати; записувати','книжка']));
+});
+test('Existing dictionary entries with mixed casing share a card and retain their saved contexts',async()=>{
+ const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}});
+ const t=new Translation.EnglishTranslation({root:ai.root,ai,glossary:[{en:'bottleneck',uk:'вузьке місце'}]});
+ const file=t.file;
+ const existing=[
+  {id:'1'.repeat(64),text:'bottleneck',context:'Find the bottleneck in this pipeline.',at:'2026-11-19T12:00:00Z'},
+  {id:'2'.repeat(64),text:'Bottleneck',context:'Bottleneck: the queue writes to disk.',at:'2026-11-19T13:00:00Z'}
+ ].map(entry=>({...entry,translation:'вузьке місце',explanation:'З курсу.',alternatives:[],provider:'local',model:'course-glossary'}));
+ fs.mkdirSync(path.dirname(file),{recursive:true});
+ fs.writeFileSync(file,JSON.stringify({version:1,entries:existing}));
+ const old=(await t.handle({action:'list'})).entries;
+ assert.equal(old.length,1);
+ assert.equal(old[0].text,'bottleneck');
+ assert.deepEqual(old[0].uses.map((use:{context:string})=>use.context),[existing[1]!.context,existing[0]!.context]);
+ const cached=await t.handle({action:'lookup',text:'BOTTLENECK',context:'BOTTLENECK: the queue writes to disk.'});
+ assert.equal(cached.cached,true);
+ assert.equal(cached.entry.id,existing[1]!.id);
+ assert.deepEqual(t.read().entries,existing);
+ await Promise.all([
+  t.handle({action:'lookup',text:'bottleneck',context:'The network is the bottleneck.'}),
+  t.handle({action:'lookup',text:'BOTTLENECK',context:'The network is the BOTTLENECK.'})
+ ]);
+ assert.equal(t.read().entries.length,3);
+ const saved=await t.handle({action:'list'});
+ assert.equal(saved.entries.length,1);
+ assert.equal(saved.entries[0].uses.length,3);
 });
 test('Translator has no paid fallback, requires complimentary flags, obeys the local cap and caches AI results',async()=>{
- const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}}),t=new Translation.EnglishTranslation({root:ai.root,ai,glossary:[]});ai.save({provider:'openai',key:'fake'});let calls=0;ai.remote=async()=>{calls++;throw Error('Should not call');};await assert.rejects(t.handle({action:'translate',provider:'complimentary',text:'handover',context:'A handover note for the team.'}),/акційн/);assert.equal(calls,0);
- ai.save({hybridRouting:true,complimentaryEnrolled:true,openaiStandardBudget:1000});await assert.rejects(t.handle({action:'translate',provider:'complimentary',text:'handover',context:'A handover note for the team.'}),/ліміту/);assert.equal(calls,0);
+ const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}}),t=new Translation.EnglishTranslation({root:ai.root,ai,glossary:[]});ai.save({provider:'openai',key:'fake'});let calls=0;ai.remote=async()=>{calls++;throw Error('Should not call');};await assert.rejects(t.handle({action:'translate',provider:'complimentary',text:'handover',context:'A handover note for the team.'}),/promotional/);assert.equal(calls,0);
+ ai.save({hybridRouting:true,complimentaryEnrolled:true,openaiStandardBudget:1000});await assert.rejects(t.handle({action:'translate',provider:'complimentary',text:'handover',context:'A handover note for the team.'}),/local daily token limit/);assert.equal(calls,0);
  ai.save({openaiStandardBudget:200000});ai.remote=async()=>{calls++;return {status:'completed',usage:{input_tokens:50,output_tokens:60},output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({translation:'передавання справ',explanation:'Роботу передають колезі.',alternatives:[{text:'передача зміни',when:'Для позмінної роботи.'},{text:'передавання повноважень',when:'Для відповідальності.'}]})}]}]};};
  const request={action:'translate',provider:'complimentary',text:'handover',context:'A handover note for the team.'};await t.handle(request);assert.equal((await t.handle(request)).cached,true);assert.equal(calls,1);
 });
 test('OpenRouter translation pins a free route and zero price; saved dictionary handles concurrent writes',async()=>{
  const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}});ai.save({provider:'openrouter',key:'fake'});ai.remote=async(url:string,options:any)=>{assert.equal(url,'https://openrouter.ai/api/v1/chat/completions');const b=JSON.parse(options.body);assert.equal(b.model,'openrouter/free');assert.deepEqual(b.provider.max_price,{prompt:0,completion:0,request:0});return {choices:[{message:{content:JSON.stringify({translation:'передавання справ',explanation:'Робочий контекст.',alternatives:[{text:'передача зміни',when:'Графік роботи.'},{text:'передавання повноважень',when:'Відповідальність.'}]})}}]};};
  const t=new Translation.EnglishTranslation({root:ai.root,ai,glossary:[]});await t.handle({action:'translate',provider:'openrouter',text:'handover',context:'The team prepared a handover.'});await Promise.all([t.handle({action:'lookup',text:'feature',context:'Add an app feature.'}),t.handle({action:'lookup',text:'role',context:'A team role.'})]);assert.equal((await t.handle({action:'list'})).entries.length,3);
+});
+
+test('Selected-text help uses promotional Luna, then confirmed Groq, then zero-price OpenRouter',async()=>{
+ const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}});
+ for(const provider of ['openai','groq','gemini','openrouter'])ai.save({provider,key:'mock-key'});
+ ai.save({hybridRouting:true,complimentaryEnrolled:true,translationGroqFreeConfirmed:true,automaticFallback:false});
+ const service=new Translation.EnglishTranslation({root:ai.root,ai});
+ const calls:string[]=[];
+ ai.remote=async(url:string,options:any)=>{
+  const body=JSON.parse(options.body);
+  const provider=new URL(url).hostname;
+  calls.push(provider);
+  assert.ok(options.signal instanceof AbortSignal);
+  if(provider==='api.openai.com'){
+   assert.equal(body.model,'gpt-6-luna');
+   assert.equal(body.store,false);
+   assert.equal(JSON.parse(body.input).context,'We show patients an early version of the booking form.');
+   throw Object.assign(Error('Test throttling'),{code:'429'});
+  }
+  if(provider==='api.groq.com'){
+   assert.equal(body.model,'openai/gpt-oss-20b');
+   return {choices:[{message:{content:'{"explanation":"\u041d\u0435\u0432\u0456\u0440\u043d\u0430 \u043c\u043e\u0432\u0430"}'}}]};
+  }
+  assert.equal(provider,'openrouter.ai');
+  assert.equal(body.model,'openrouter/free');
+  assert.deepEqual(body.provider.max_price,{prompt:0,completion:0,request:0});
+  return {choices:[{message:{content:'{"explanation":"Patients test the first working form before the team improves it."}'}}]};
+ };
+ const request={action:'explain',text:'an early version',context:'We show patients an early version of the booking form.'};
+ const result=await service.handle(request);
+ assert.deepEqual(calls,['api.openai.com','api.groq.com','openrouter.ai']);
+ assert.equal(result.provider,'openrouter');
+ assert.equal(await service.handle(request),result);
+ assert.equal(calls.length,3);
+ assert.deepEqual((await service.handle({action:'list'})).entries,[]);
+});
+
+test('Correction and synonyms use separate requests, filter repeats, and skip ineligible keys',async()=>{
+ const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}});
+ for(const provider of ['openai','groq','gemini'])ai.save({provider,key:'mock-key'});
+ let calls=0;
+ ai.remote=async(url:string,options:any)=>{
+  assert.equal(new URL(url).hostname,'api.groq.com');
+  calls++;
+  const system=JSON.parse(options.body).messages[0].content;
+  const content=system.includes('one replacement')
+   ?{replacement:'overcomplicating',explanation:'Use this verb for making a process more complex than necessary.'}
+   :{explanation:'These options fit the sentence.',suggestions:[{word:'complicating',reason:'Neutral wording.'},{word:'Complicating',reason:'Duplicate.'},{word:'making it harder',reason:'More conversational.'}]};
+  return {choices:[{message:{content:JSON.stringify(content)}}]};
+ };
+ const service=new Translation.EnglishTranslation({root:ai.root,ai});
+ const word={text:'overcycling',context:'We are overcycling the booking workflow.'};
+ await assert.rejects(service.handle({action:'correct',...word}),/Enable a supported provider/);
+ assert.equal(calls,0);
+ ai.save({translationGroqFreeConfirmed:true});
+ assert.equal((await service.handle({action:'correct',...word})).replacement,'overcomplicating');
+ assert.deepEqual((await service.handle({action:'synonyms',...word})).suggestions.map((item:any)=>item.word),['complicating','making it harder']);
+ assert.equal(calls,2);
+});
+
+test('English lesson blocks keep course instructions in English for all 84 lessons and localise saved task text',()=>{
+ const cyrillic=/\p{Script=Cyrillic}/u;
+ for(const lesson of (Course as any).lessons){
+  assert.ok(!cyrillic.test(lesson.grammar.title+' '+lesson.grammar.explanation),lesson.id);
+  for(const word of lesson.vocabulary)assert.ok(!cyrillic.test(word.conceptPrompt),lesson.id);
+  for(const q of lesson.grammar.exercises)assert.ok(!cyrillic.test(q.explanation+' '+q.instruction+' '+q.hint),lesson.id);
+ }
+ const c=new EnglishController(newEnglishDocument());c.start();
+ const attempt=c.document.course.activeSession!;
+ const lesson=attempt.lesson as any;
+ lesson.vocabulary[0].conceptPrompt='Write one sentence using “project” (noun — проєкт).';
+ lesson.grammar.exercises[0].hint='Team тут — однина.';
+ const answer=c.document.course.activeSession!.answers;
+ answer['grammar-0']='The team checks the booking page.';
+ const refreshed=new EnglishController(c.document).view();
+ assert.equal(refreshed.attempt!.answers['grammar-0'],answer['grammar-0']);
+ assert.equal(refreshed.lesson.vocabulary[0].conceptPrompt,'Write one sentence using “project” (noun).');
+ assert.ok(!cyrillic.test((refreshed.lesson.grammar.exercises[0] as any).hint));
+ for(const id of ['vocabulary','reading','listening','grammar','speaking','writing']){
+  const blockIndex=refreshed.lesson.blocks.findIndex(block=>block.id===id);
+  assert.ok(!cyrillic.test(renderAIBlock({...refreshed,attempt:{...refreshed.attempt!,blockIndex}},'')),id);
+ }
 });
 
 test('Early readings separate story facts from instructions, and frozen active reading stays unchanged',()=>{for(const l of (Course as any).lessons.filter((l:any)=>l.type==='lesson')){assert.ok(!l.reading.text.includes('In our team discussion, we separate'));for(const q of l.reading.questions.slice(0,3))assert.ok(l.reading.text.toLowerCase().includes(q.options[q.correct].toLowerCase()),l.id);}const team=(Course as any).lessons.find((l:any)=>l.concept.title==='Team roles'||l.title==='Team roles');assert.match(team.reading.text,/cannot review every detail/);const c=new EnglishController(newEnglishDocument());c.start();const doc=structuredClone(c.document);doc.course.activeSession!.lesson.reading.text='An earlier frozen passage that the learner has already read.';const restored=new EnglishController(doc);assert.equal(restored.view().attempt!.lesson.reading.text,'An earlier frozen passage that the learner has already read.');});

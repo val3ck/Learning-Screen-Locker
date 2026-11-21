@@ -171,12 +171,12 @@ var EnglishSpeech = class {
 
 // src/modules/english/speech-content.ts
 function englishSpeechText(lesson, request) {
-  if (!request || typeof request !== "object") throw new Error("\u041D\u0435\u043A\u043E\u0440\u0435\u043A\u0442\u043D\u0438\u0439 \u0437\u0430\u043F\u0438\u0442 \u043E\u0437\u0432\u0443\u0447\u0435\u043D\u043D\u044F.");
+  if (!request || typeof request !== "object") throw new Error("Invalid audio request.");
   if (request.kind === "dialogue") return lesson.listening.dialogue.map((turn) => turn.text).join("\n\n");
   if (request.kind === "model") return lesson.speaking.model;
   if (request.kind === "word" && Number.isInteger(request.index) && request.index >= 0 && request.index < lesson.vocabulary.length) return lesson.vocabulary[request.index].en;
   if (request.kind === "catch-word" && Number.isInteger(request.index) && request.index >= 0 && Array.isArray(lesson.listening.catchWords) && request.index < lesson.listening.catchWords.length) return lesson.listening.catchWords[request.index].word;
-  throw new Error("\u0426\u044C\u043E\u0433\u043E \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430 \u043D\u0435\u043C\u0430\u0454 \u0432 \u043F\u043E\u0442\u043E\u0447\u043D\u043E\u043C\u0443 \u0443\u0440\u043E\u0446\u0456.");
+  throw new Error("This excerpt is not part of the current lesson.");
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

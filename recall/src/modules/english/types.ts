@@ -32,14 +32,18 @@ export interface EnglishAttempt {
 }
 export interface EnglishCourseState {version:1;contentVersion:string;createdAt:string;activeSession:EnglishAttempt|null;sessions:EnglishAttempt[];reviews:Record<string,EnglishReview>;completedDays:string[];xp:number;legacy:Record<string,unknown>;familiarWords:{id:string;verified:false}[];settings:{reminderTime:string;reminderEnabled:boolean};migration:unknown}
 export interface EnglishPractice {aiAssessment?:any;id:string;kind:'word'|'choice'|'production'|'sentence';prompt:string;answer:string;explanation:string;options?:string[];correct?:number;result?:EnglishResult;value:string;revealed:boolean;attempts:number;instruction?:string;clue?:string;hint?:string;example?:string;wordBank?:string[];wordId?:string;presentationVersion?:number;reference?:{label:string;text:string;status:string};previousAnswers?:string[]}
-export interface EnglishRunPayload {phase:'lesson'|'break'|'reinforcement';lessonId:string;breakRemainingMs:number;breakUsed:boolean;practiceIndex:number;practice:EnglishPractice|null;practiceHistory?:EnglishPractice[];extraPractice?:true}
-export interface EnglishDay {activeMs:number;dismissed:boolean;fulfilled:boolean;learningComplete:boolean}
-export interface EnglishDocument {version:2;revision:number;course:EnglishCourseState;days:Record<string,EnglishDay>;runs:LearningEnvelope<EnglishRunPayload>[];activeRunId:string|null;lease?:{owner:string;expiresAt:number};importedAt?:string}
+export interface EnglishRunPayload {phase:'lesson'|'break'|'reinforcement';lessonId:string;breakRemainingMs:number;breakUsed:boolean;practiceIndex:number;practice:EnglishPractice|null;practiceHistory?:EnglishPractice[];extraPractice?:true;revisit?:true;overtimeBlock?:number}
+export interface EnglishDay {activeMs:number;targetMinutes?:number;dismissed:boolean;fulfilled:boolean;learningComplete:boolean}
+export interface EnglishDocument {version:2;revision:number;course:EnglishCourseState;days:Record<string,EnglishDay>;runs:LearningEnvelope<EnglishRunPayload>[];activeRunId:string|null;lease?:{owner:string;expiresAt:number};importedAt?:string;parkedAttempts?:EnglishAttempt[];primaryAttemptId?:string}
 export interface EnglishView {
+ targetMs:number;
  aiSettings?:any;
+ reviewGroups?:{id:string;title:string;rule:string;count:number;total:number;maintained:boolean;evidence:{episodeId:string;original:string;replacement:string}[]}[];
+ reviewGroupMessage?:string;
  canExtend?:boolean;
+ topics?:{lessonId:string;title:string;number:number;status:'active'|'unfinished'|'complete'|'next';attemptId?:string}[];
  blockStatus?:{id:string;title:string;done:boolean}[];
  advanceBlocker?:string;
   revision:number;courseVersion:string;lesson:EnglishLesson;attempt:EnglishAttempt|null;run:LearningEnvelope<EnglishRunPayload>|null;day:EnglishDay;completedLessons:number;totalLessons:number;familiarWords:number;reviewsDue:number;readonly:boolean;canAdvance:boolean;canCompleteLesson:boolean;canSurrender:boolean;canFinish:boolean;exitQuestions:{key:string;prompt:string;kind:'word'|'choice';answer:string;options?:string[];correct?:number}[];history:{id:string;title:string;at:string;activeMs:number;selfReported:number;assisted:number;independent:number;listeningUnavailable:boolean}[];recordings?:Record<string,string>;message?:string;
-  savedWork?:{id:string;title:string;at:string;answers:Record<string,string>;checks:Record<string,EnglishLanguageReport>;assessments?:Record<string,any>;coachingPrompt?:string;liveSpeaking?:SpeakingDialogue}[];
+  savedWork?:{id:string;title:string;at:string;answers:Record<string,string>;tasks:Record<string,string>;checks:Record<string,EnglishLanguageReport>;assessments?:Record<string,any>;coachingPrompt?:string;liveSpeaking?:SpeakingDialogue}[];
 }

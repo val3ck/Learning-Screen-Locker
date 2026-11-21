@@ -13,6 +13,7 @@
     "start:english": "npm --prefix english start",
     "start:sql": "npm --prefix SQL start",
     "start:node": "npm --prefix nodejs run serve",
-    "package:win": "npm --prefix nodejs run build && npm --prefix recall run package"
+    "package:win": "npm --prefix nodejs run build && npm --prefix recall run package",
+    "release:win": "node recall/scripts/release-win.mjs"
   }
 }

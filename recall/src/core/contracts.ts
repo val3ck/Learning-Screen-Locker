@@ -1,3 +1,4 @@
+import type {TrackDurations,TrackProgress} from './tracks';
 export interface Topic {id:string; title:string; chapter:number; prerequisites:string[]}
 export interface Progress {version:1; moduleId:string; catalogVersion:string; confirmedTopicIds:string[]; practiceTopicIds:string[]; completedSourceIds:string[]; syncedAt:string}
 export interface DataTable {name:string; columns:{name:string; type:string}[]; rows:Record<string,unknown>[]}
@@ -15,7 +16,7 @@ export interface SessionRecord {
   version:1; id:string; moduleId:string; contentVersion:string; dayKey:string; mode:'daily'|'practice'|'demo';
   startedAt:string; endedAt?:string; outcome?:'completed'|'surrendered'|'interrupted'|'technical';
   activeMs:number; currentIndex:number; tasks:Task[]; answers:string[]; hintLevels:number[];
-  solved:boolean[]; taskElapsedMs:number[]; attempts:Attempt[]; paused?:boolean; baseTaskCount?:number;
+  solved:boolean[]; taskElapsedMs:number[]; attempts:Attempt[]; paused?:boolean; baseTaskCount?:number; durationMinutes?:number;
 }
 export interface GenerationContext {confirmedTopicIds:string[]; history:Record<string,TopicHistory>; sessions:SessionRecord[]; now:string; seed:number;allowNewTopic?:boolean}
 export interface SolutionExample {id:string; title:string; code:string; explanation:string; whenToUse:string; requiredTopicIds:string[]}
@@ -31,7 +32,7 @@ export interface LearningModule {
   presentation:{language:string; answerLabel:string; contextLabel:string};
 }
 export interface ModuleState {version:1; moduleId:string; progress:Progress|null; history:Record<string,TopicHistory>; learnedTopicIds?:string[]}
-export interface Settings {version:1; setupComplete:boolean; autoStart:boolean; statisticsPath:string; coursePath:string; activeModuleId:string; minPracticeMinutes:number; dailyEnabledAfterDay:string; englishEnabled?:boolean;englishEnabledAfterDay?:string;englishStartHour?:number;englishCoursePath?:string;sqlAIEnabled?:boolean;sqlLearningBonus?:boolean;sqlAIFallback?:boolean}
+export interface Settings {version:1; setupComplete:boolean; autoStart:boolean; statisticsPath:string; coursePath:string; activeModuleId:string; minPracticeMinutes:number; durationMinutes?:TrackDurations; dailyEnabledAfterDay:string; englishEnabled?:boolean;englishEnabledAfterDay?:string;englishStartHour?:number;englishCoursePath?:string;sqlAIEnabled?:boolean;sqlLearningBonus?:boolean;sqlAIFallback?:boolean}
 export interface ScheduleState {version:1; dayKey:string; eligible:boolean; delayMs:number; activeMs:number; warned:boolean; triggered:boolean; finished:boolean; lastTick:number; snoozedUntil?:number; warningRemainingMs?:number}
 export interface WarningStatus {remainingSeconds:number; shortcutAvailable:boolean; pausedSession:boolean}
 export interface SQLAIStatus {enabled:boolean;lunaConfigured:boolean;fallbackEnabled:boolean;fallbackConfigured:boolean;cached:number;busy:boolean;message:string}
@@ -39,10 +40,12 @@ export const SQL_CHAT_LIMIT = 5;
 export const SQL_CHAT_QUESTION_LIMIT = 1200;
 export interface SQLChatRequest {sessionId:string;taskId:string;question:string;feedback?:string}
 export interface SQLChatReply {answer:string;model:string;provider:string}
-export interface Bootstrap {settings:Settings; module:ModuleState; sessions:SessionRecord[]; schedule:ScheduleState; demo:boolean; recoveryMessages:string[]; activeSession:SessionRecord|null; shortcutAvailable:boolean;english?:import('../modules/english/types').EnglishView;activeLearningSession?:import('./learning').LearningEnvelope|null;sqlAI?:SQLAIStatus}
+export interface Bootstrap {settings:Settings; tracks:TrackProgress; module:ModuleState; sessions:SessionRecord[]; schedule:ScheduleState; demo:boolean; recoveryMessages:string[]; activeSession:SessionRecord|null; shortcutAvailable:boolean;english?:import('../modules/english/types').EnglishView;activeLearningSession?:import('./learning').LearningEnvelope|null;sqlAI?:SQLAIStatus}
 export interface DesktopAPI {
   bootstrap():Promise<Bootstrap>;
   configure(settings:{autoStart:boolean;minPracticeMinutes?:number}):Promise<void>;
+  configureDurations(durations:TrackDurations):Promise<void>;
+  trackProgress():Promise<TrackProgress>;
   openCourse():Promise<{ok:boolean; message:string}>;
   importProgress():Promise<{ok:boolean; message:string}>;
   openStatistics():Promise<void>;
@@ -55,17 +58,17 @@ export interface DesktopAPI {
   previewWarning():Promise<void>;
   resumeDaily():Promise<Bootstrap>;
   sessionReady(sessionId:string):Promise<void>;
-  englishStart(extend?:boolean):Promise<import('../modules/english/types').EnglishView>;
+  englishStart(extend?:boolean,lessonId?:string):Promise<import('../modules/english/types').EnglishView>;
   englishPauseExtension():Promise<import('../modules/english/types').EnglishView>;
   englishAction(action:import('./learning').LearningAction):Promise<import('../modules/english/types').EnglishView>;
   englishFinish(reason:'surrendered'|'completed'):Promise<import('../modules/english/types').EnglishView>;
   englishConfigure(settings:{enabled:boolean;startHour:number}):Promise<void>;
-  englishOpen():Promise<{ok:boolean;message:string}>;
+  englishOpen(ruleId?:string):Promise<{ok:boolean;message:string}>;
   englishImport():Promise<{ok:boolean;message:string}>;
   englishSaveAudio(key:string,bytes:number[],mime:string):Promise<string>;
   englishLoadAudio(key:string):Promise<{bytes:number[];mime:string}|null>;
   englishSpeech(request:import('../modules/english/types').EnglishSpeechRequest):Promise<import('../modules/english/types').EnglishSpeechAudio>;
-  englishTranslate(request:{action:'lookup'|'translate'|'list';text?:string;context?:string;provider?:'complimentary'|'openrouter'|'groq'}):Promise<any>;
+  englishTranslate(request:import('../modules/english/translator-view').EnglishTextRequest):Promise<any>;
   englishAI(request:{action:string;area?:string;targetKey?:string;question?:string;provider?:string;options?:Record<string,unknown>;context?:import('../modules/english/dialogue').LunaMessage[]}):Promise<any>;
   sqlAI(request:{action:'settings'|'prepare'|'test';options?:{key?:string;remove?:boolean;enabled?:boolean;fallbackEnabled?:boolean;learningBonus?:boolean}}):Promise<SQLAIStatus>;
   sqlChat(request:SQLChatRequest):Promise<SQLChatReply>;

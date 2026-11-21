@@ -64,6 +64,19 @@ try {
   app = await electron.launch({executablePath:env.RECALL_TEST_EXE||require('electron'),args:[...(env.RECALL_TEST_EXE?[]:['.']),'--demo'],env,timeout:60000});
   const dashboard = await app.firstWindow();
   await dashboard.locator('#nav-english').waitFor();
+  const tracks=await dashboard.evaluate(()=>window.recall.trackProgress());
+  assert.equal(tracks.english.total,84);
+  assert.equal(tracks.nodejs.done,0);assert.ok(tracks.nodejs.total>0);
+  assert.equal(await dashboard.locator('#sidebar-tracks li').count(),3);
+  await dashboard.locator('#nav-settings').click();
+  for(const [id,minutes] of Object.entries({postgresql:'15',english:'55',nodejs:'40'})){
+    assert.equal(await dashboard.locator('#duration-'+id).inputValue(),minutes);
+  }
+  await dashboard.locator('#duration-nodejs').fill('30');
+  await dashboard.getByRole('button',{name:'Зберегти тривалість'}).click();
+  await dashboard.getByText('Тривалість наступних занять збережено.').waitFor();
+  const configured=await dashboard.evaluate(()=>window.recall.bootstrap());
+  assert.deepEqual(configured.settings.durationMinutes,{postgresql:15,english:55,nodejs:30});
   await app.evaluate(({BrowserWindow,screen})=>{
     BrowserWindow.prototype.setKiosk=function(){};
     BrowserWindow.prototype.setFullScreen=function(){};
@@ -79,6 +92,7 @@ try {
   assert.equal(await settings.locator('#key').inputValue(),'');
   await settings.locator('#preview').click();
   let prompt = await findWindow('app/node-night.html');
+  await prompt.getByText(/до 30 хв/).waitFor();
   await prompt.locator('#sleep').click();
   await waitFor(async()=> (await counts()).powerOff===1,'mock shutdown request');
   await settings.locator('#preview').click();
@@ -116,7 +130,7 @@ try {
   await waitFor(async()=> (await snapshot()).progress.lessons['setup-tools'].checks.includes(0),'desktop practice written to course');
   assert.equal((await snapshot()).progress.lessons['setup-tools'].completedAt,null);
   console.log('saved practice', await counts());
-  await app.evaluate(()=>globalThis.__recallNodeTick(Date.now()+41*60_000));
+  await app.evaluate(()=>globalThis.__recallNodeTick(Date.now()+31*60_000));
   console.log('clock advanced',await counts(),study.isClosed());
   console.log('updated bar', await study.locator('.night-bar').innerText());
   await study.locator('.night-bar strong').filter({hasText:/Час минув|Підхід завершено/}).waitFor({timeout:10000});
@@ -128,7 +142,7 @@ try {
   await normal.getByRole('tab',{name:'Перевірка'}).click();
   assert.equal(await normal.locator('.lesson-criteria input').first().isChecked(),true);
   assert.equal(await normal.locator('.notes-label textarea').inputValue(),'Після редактора: тест пройшов.');
-  console.log('PASS permission boundary, mock power-off, two display covers, original course, Luna demo, editor, shared practice, 40-minute release');
+  console.log('PASS permission boundary, mock power-off, two display covers, original course, Luna demo, editor, shared practice, configured 30-minute release');
 } finally {
   if (app) {
     await app.evaluate(({BrowserWindow})=>{for(const w of BrowserWindow.getAllWindows())if(w.webContents.getURL().includes('/#/lesson/'))w.emit('query-session-end',{});}).catch(()=>{});

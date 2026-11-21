@@ -3,8 +3,14 @@ const aiServices=new Map();
 const fs=require('node:fs'),path=require('node:path');
 const {EnglishRepository,Conflict}=require('./english-repository.cjs');
 function dayKey(date=new Date()){const p=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Kyiv',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'}).formatToParts(date).map(p=>[p.type,p.value]));const d=new Date(Date.UTC(+p.year,+p.month-1,+p.day));if(+p.hour<5)d.setUTCDate(d.getUTCDate()-1);return d.toISOString().slice(0,10);}
-const target=55*60000;const grammarCheckers=new Map();
-function validateDocument(value,E){if(value?.version!==2||!Number.isInteger(value.revision)||value.revision<0||!value.days||!Array.isArray(value.runs)||value.runs.length>10000)throw new Conflict('Несумісне збереження English.',400);const next=structuredClone(value);next.course=E.validateImport(next.course);for(const [key,day]of Object.entries(next.days))if(!/^\d{4}-\d{2}-\d{2}$/.test(key)||!Number.isFinite(day.activeMs)||day.activeMs<0||day.activeMs>target)throw new Conflict('Некоректний час English.',400);return next;}
+const minuteMs=60000,defaultMinutes=55;
+const validMinutes=value=>Number.isInteger(value)&&value>=15&&value<=120;
+function durationIn(statisticsPath){try{
+  const value=JSON.parse(fs.readFileSync(path.join(statisticsPath,'settings.json'),'utf8')).durationMinutes?.english;
+  if(validMinutes(value))return value;
+}catch{}return defaultMinutes;}
+const grammarCheckers=new Map();
+function validateDocument(value,E){if(value?.version!==2||!Number.isInteger(value.revision)||value.revision<0||!value.days||!Array.isArray(value.runs)||value.runs.length>10000)throw new Conflict('Несумісне збереження English.',400);const next=structuredClone(value);next.course=E.validateImport(next.course);for(const [key,day]of Object.entries(next.days))if(!/^\d{4}-\d{2}-\d{2}$/.test(key)||!Number.isFinite(day.activeMs)||day.activeMs<0||day.activeMs>120*minuteMs||day.targetMinutes!==undefined&&!validMinutes(day.targetMinutes))throw new Conflict('Некоректний час English.',400);return next;}
 function createDefault(E,C){return {version:2,revision:0,course:E.defaultState(),days:{},runs:[],activeRunId:null};}
 function totalMs(course){return [...course.sessions,...(course.activeSession?[course.activeSession]:[])].reduce((n,s)=>n+s.activeMs,0);}
 function mergeCourse(previous,incoming){
@@ -15,7 +21,7 @@ function mergeCourse(previous,incoming){
   if(!next.activeSession&&incoming.activeSession&&!next.sessions.some(s=>s.lessonId===incoming.activeSession.lessonId&&s.mode==='course'))next.activeSession=incoming.activeSession;
   else if(next.activeSession&&incoming.activeSession&&next.activeSession.id===incoming.activeSession.id&&incoming.activeSession.activeMs>next.activeSession.activeMs)next.activeSession=incoming.activeSession;
   for(const [id,item]of Object.entries(incoming.reviews))if(!next.reviews[id]||(item.lastDay||'')>(next.reviews[id].lastDay||''))next.reviews[id]=item;
-  const manual=new Map([...(incoming.migration?.manualAdvances||[]),...(next.migration?.manualAdvances||[])].map(a=>[a.lessonId,a]));if(manual.size){next.migration={...next.migration,manualAdvances:[...manual.values()]};if(next.activeSession&&[...manual.values()].some(a=>a.attempt.id===next.activeSession.id))next.activeSession=null;if(!next.activeSession&&incoming.activeSession&&![...manual.values()].some(a=>a.attempt.id===incoming.activeSession.id)&&!next.sessions.some(s=>s.mode==='course'&&s.lessonId===incoming.activeSession.lessonId))next.activeSession=incoming.activeSession;}
+  const manual=new Map([...(incoming.migration?.manualAdvances||[]),...(next.migration?.manualAdvances||[])].map(a=>[a.lessonId,a]));if(manual.size){next.migration={...next.migration,manualAdvances:[...manual.values()]};if(next.activeSession&&!next.activeSession.resumedFromArchive&&[...manual.values()].some(a=>a.attempt.id===next.activeSession.id))next.activeSession=null;if(!next.activeSession&&incoming.activeSession&&(incoming.activeSession.resumedFromArchive||![...manual.values()].some(a=>a.attempt.id===incoming.activeSession.id))&&!next.sessions.some(s=>s.mode==='course'&&s.lessonId===incoming.activeSession.lessonId))next.activeSession=incoming.activeSession;}
   next.legacy={...next.legacy,...incoming.legacy,learnedWords:{...next.legacy.learnedWords,...incoming.legacy.learnedWords}};const words=new Map([...incoming.familiarWords,...next.familiarWords].map(w=>[w.id,w]));next.familiarWords=[...words.values()];return next;
 }
 async function handle(route,method,body,{root,statisticsPath}){
@@ -30,7 +36,7 @@ async function handle(route,method,body,{root,statisticsPath}){
     if(route.startsWith('/api/recall/ai/')){
       let ai=aiServices.get(config.statisticsPath);if(!ai){ai=new(require('./english-ai.cjs').EnglishAI)({statisticsPath:config.statisticsPath,legacyConfigPath:statisticsPath?undefined:path.join(root,'.english-daily-private.json'),env:statisticsPath?{}:process.env});aiServices.set(config.statisticsPath,ai);}const action=route.split('/').pop();
       if(action==='settings')return {status:200,body:{settings:method==='POST'?ai.save(body):ai.settings()}};
-      if(action==='translate'){ai.dictionary??=new(require('./english-translation.cjs').EnglishTranslation)({root:config.statisticsPath,ai,glossary:C.lessons.flatMap(l=>l.vocabulary)});return {status:200,body:await ai.dictionary.handle(body)};}
+      if(action==='translate'){const {EnglishTranslation,courseGlossary}=require('./english-translation.cjs');ai.dictionary??=new EnglishTranslation({root:config.statisticsPath,ai,glossary:courseGlossary(C.lessons)});return {status:200,body:await ai.dictionary.handle(body)};}
       if(action==='models')return {status:200,body:{models:await ai.models(body.provider)}};
       if(repo.readonly(owner))throw new Conflict('The lesson is open in another interface.');
       const d=repo.read(),s=d.course.activeSession,l=s?.lesson||C.getLesson(d.course.sessions.at(-1)?.lessonId)||C.lessons[0];
@@ -57,8 +63,10 @@ async function handle(route,method,body,{root,statisticsPath}){
     else current.course=incoming;
     const today=dayKey(),day=current.days[today]??={activeMs:0,dismissed:false,fulfilled:false,learningComplete:false};
     const importedTime=incoming.sessions.filter(s=>dayKey(new Date(s.endedAt||s.startedAt))===today).reduce((n,s)=>n+s.activeMs,0)+(incoming.activeSession&&dayKey(new Date(incoming.activeSession.startedAt))===today?incoming.activeSession.activeMs:0);
+    const activeRun=current.runs.find(run=>run.id===current.activeRunId&&!run.endedAt&&run.dayKey===today&&!run.payload?.extraPractice&&!run.payload?.revisit);
+    const target=(day.targetMinutes??(activeRun?defaultMinutes:durationIn(config.statisticsPath)))*minuteMs;
     const delta=body.import?Math.max(0,importedTime-day.activeMs):Math.max(0,totalMs(incoming)-before);
-    day.activeMs=Math.min(target,day.activeMs+Math.min(delta,body.import?target:60000));day.fulfilled=day.activeMs>=target;day.learningComplete=current.course.sessions.some(s=>dayKey(new Date(s.endedAt||s.startedAt))===today);
+    day.activeMs=Math.max(day.activeMs,Math.min(target,day.activeMs+Math.min(delta,body.import?target:minuteMs)));day.fulfilled=day.fulfilled||day.activeMs>=target;day.learningComplete=current.course.sessions.some(s=>dayKey(new Date(s.endedAt||s.startedAt))===today);
     if(current.course.activeSession)current.course.activeSession.dayKey=dayKey(new Date(current.course.activeSession.startedAt));
     const saved=repo.write(current,body.revision,owner);
     if(!incoming.activeSession||incoming.activeSession.paused)repo.release(owner);

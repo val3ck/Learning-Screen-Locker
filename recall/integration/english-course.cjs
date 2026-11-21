@@ -147,65 +147,65 @@ Circuit breakers|A circuit breaker temporarily stops calls to a failing dependen
 
   const GRAMMAR = [
     ['Present Simple та питання', 'Для регулярних дій: we work, she works. Питання: What does it do? Після does — базова форма.', [
-      ['The team ___ this feature every day.', ['checks','check','checking'],0,'Team тут — однина: checks.'],
-      ['What ___ this component do?', ['do','does','is'],1,'Does + підмет + базова форма do.'],
-      ['We ___ access to the test account.', ['needs','needing','need'],2,'Після we: need.'],
-      ['She ___ on the booking app.', ['works','work','working'],0,'Третя особа однини: works.']]],
+      ['The team ___ this feature every day.', ['checks','check','checking'],0,'Use checks with the singular subject the team.'],
+      ['What ___ this component do?', ['do','does','is'],1,'Use does, then the subject and the base verb do.'],
+      ['We ___ access to the test account.', ['needs','needing','need'],2,'Use need with we.'],
+      ['She ___ on the booking app.', ['works','work','working'],0,'Use works with a singular third-person subject.']]],
     ['Past Simple та завершені зміни', 'Для завершеної події в минулому: changed, fixed, went. У питаннях did + базова форма.', [
-      ['Yesterday we ___ the change.', ['merge','merged','merging'],1,'Yesterday задає завершений минулий час.'],
-      ['Why did the check ___?', ['failed','failing','fail'],2,'Після did — fail.'],
-      ['I ___ the description last night.', ['updated','update','have update'],0,'Last night — завершений час.'],
-      ['We ___ change the public interface.', ["didn't","doesn't","weren't"],0,'Заперечення Past Simple: did not + change.']]],
+      ['Yesterday we ___ the change.', ['merge','merged','merging'],1,'Yesterday places the action in a completed past period.'],
+      ['Why did the check ___?', ['failed','failing','fail'],2,'Use the base verb fail after did.'],
+      ['I ___ the description last night.', ['updated','update','have update'],0,'Last night places the action in a completed past period.'],
+      ['We ___ change the public interface.', ["didn't","doesn't","weren't"],0,'Use did not followed by the base verb change.']]],
     ['Подія чи поточний результат', 'Past Simple описує минулі події; Present Perfect пов’язує минуле з теперішнім.', [
-      ['We ___ the release yesterday.', ['have deployed','deployed','deploy'],1,'Yesterday — завершений минулий період.'],
-      ['The service is ready now: we ___ the missing setting.', ['have added','has added','adding'],0,'Have added підкреслює поточний результат.'],
-      ['___ you checked the build yet?', ['Did','Has','Have'],2,'Have + you + V3; yet типове для цього контексту.'],
-      ['The deployment ___ at 3 pm yesterday.', ['has failed','failed','failing'],1,'Конкретна завершена подія: failed.']]],
+      ['We ___ the release yesterday.', ['have deployed','deployed','deploy'],1,'Yesterday refers to a completed past period.'],
+      ['The service is ready now: we ___ the missing setting.', ['have added','has added','adding'],0,'Have added connects the change to the current result.'],
+      ['___ you checked the build yet?', ['Did','Has','Have'],2,'Use have with you, followed by a past participle.'],
+      ['The deployment ___ at 3 pm yesterday.', ['has failed','failed','failing'],1,'Use failed for an event that took place at a specific past time.']]],
     ['Питання й ввічливі уточнення', 'Пряме питання: What does it return? Після Could you explain — порядок твердження: what it returns.', [
-      ['Could you explain what the API ___?', ['returns','does return it','return'],0,'У непрямому питанні: підмет + дієслово.'],
-      ['What ___ this status mean?', ['is','does','do'],1,'Does + this status + mean.'],
-      ['Do you know why the request ___?', ['did fail it','does it fail','failed'],2,'Після why тут звичайний порядок слів.'],
-      ['___ you show me an example?', ['Could','Must to','Do to'],0,'Could you — ввічливе прохання.']]],
+      ['Could you explain what the API ___?', ['returns','does return it','return'],0,'Use subject–verb order in an indirect question.'],
+      ['What ___ this status mean?', ['is','does','do'],1,'Use does, then this status and the base verb mean.'],
+      ['Do you know why the request ___?', ['did fail it','does it fail','failed'],2,'Use statement word order after why in this indirect question.'],
+      ['___ you show me an example?', ['Could','Must to','Do to'],0,'Could you begins a polite request.']]],
     ['Порівняння й кількість', 'Fewer — зі злічуваними множинними іменниками; less — з незлічуваними. Порівняння: faster than, more expensive than.', [
-      ['This version sends ___ requests.', ['less','fewer','much'],1,'Requests можна порахувати: fewer.'],
-      ['The operation uses ___ memory.', ['fewer','many','less'],2,'Memory тут незлічуване.'],
-      ['This query is faster ___ the previous one.', ['than','then','as'],0,'Порівняння: faster than.'],
-      ['Writes may become ___ expensive.', ['more','most','many'],0,'More expensive — вищий ступінь.']]],
+      ['This version sends ___ requests.', ['less','fewer','much'],1,'Requests are countable, so use fewer.'],
+      ['The operation uses ___ memory.', ['fewer','many','less'],2,'Memory is uncountable here, so use less.'],
+      ['This query is faster ___ the previous one.', ['than','then','as'],0,'Use than after the comparative faster.'],
+      ['Writes may become ___ expensive.', ['more','most','many'],0,'Use more to form the comparative more expensive.']]],
     ['Процес і регулярна поведінка', 'Present Continuous: is/are + -ing для поточного процесу. Present Simple — для звичної поведінки.', [
-      ['The user ___ a new date right now.', ['selects','is selecting','select'],1,'Right now підкреслює поточний процес.'],
-      ['The component usually ___ a loading message.', ['shows','is show','showing'],0,'Usually описує типову поведінку.'],
-      ['We ___ the old listener at the moment.', ['remove','removed','are removing'],2,'At the moment: are removing.'],
-      ['The page ___ after every change.', ['updates','update','is update'],0,'Типова повторювана дія: updates.']]],
+      ['The user ___ a new date right now.', ['selects','is selecting','select'],1,'Right now describes an action in progress.'],
+      ['The component usually ___ a loading message.', ['shows','is show','showing'],0,'Usually describes regular behaviour.'],
+      ['We ___ the old listener at the moment.', ['remove','removed','are removing'],2,'Use are removing for an action in progress.'],
+      ['The page ___ after every change.', ['updates','update','is update'],0,'This recurring action takes the Present Simple.']]],
     ['Умови й наслідки', 'Реальна умова: If + Present Simple, will/can + дієслово.', [
-      ['If the writer is slow, the buffer ___ grow.', ['can','to','would to'],0,'Can + базова форма.'],
-      ['If we ___ independent work together, we can reduce waiting.', ['starts','start','will starts'],1,'Після if у цій умові: start.'],
-      ['We will continue when the resource ___ ready.', ['will be','being','is'],2,'У часовій підрядній частині тут Present Simple.'],
-      ['If a request fails, we ___ handle the error.', ['must','must to','musts'],0,'Must + базова форма.']]],
+      ['If the writer is slow, the buffer ___ grow.', ['can','to','would to'],0,'Follow can with the base verb.'],
+      ['If we ___ independent work together, we can reduce waiting.', ['starts','start','will starts'],1,'Use the Present Simple in this if-clause.'],
+      ['We will continue when the resource ___ ready.', ['will be','being','is'],2,'Use the Present Simple in this time clause.'],
+      ['If a request fails, we ___ handle the error.', ['must','must to','musts'],0,'Follow must with the base verb.']]],
     ['Причини та протиставлення', 'Because + речення; because of + іменник. Although вводить протиставлення.', [
-      ['We split the function ___ it had several responsibilities.', ['because of','because','despite'],1,'Because вводить речення.'],
-      ['___ the change is small, it needs tests.', ['Although','Because of','Despite of'],0,'Although + підмет + дієслово.'],
-      ['The release was delayed because of ___.', ['it failed','we test','a failing check'],2,'Because of + іменникова група.'],
-      ['The design is simpler; ___, it has limitations.', ['however','because of','despite of'],0,'However — протиставлення між думками.']]],
+      ['We split the function ___ it had several responsibilities.', ['because of','because','despite'],1,'Because introduces a complete clause.'],
+      ['___ the change is small, it needs tests.', ['Although','Because of','Despite of'],0,'Use although before a subject and verb.'],
+      ['The release was delayed because of ___.', ['it failed','we test','a failing check'],2,'Because of introduces a noun phrase.'],
+      ['The design is simpler; ___, it has limitations.', ['however','because of','despite of'],0,'However connects two contrasting points.']]],
     ['Обережні висновки', 'May/might/could — можливість; must — сильний логічний висновок у відповідному контексті.', [
-      ['The cache ___ contain an old value; we have not checked yet.', ['must to','might','is'],1,'Might передає невпевненість.'],
-      ['We ___ measure before drawing a conclusion.', ['should','should to','shoulds'],0,'Should + базова форма.'],
-      ['This result ___ prove the cause on its own.', ['not','is not','does not'],2,'Заперечення з prove: does not prove.'],
-      ['The spike could ___ related to the traffic burst.', ['be','is','being'],0,'Could + be.']]],
+      ['The cache ___ contain an old value; we have not checked yet.', ['must to','might','is'],1,'Might expresses uncertainty.'],
+      ['We ___ measure before drawing a conclusion.', ['should','should to','shoulds'],0,'Follow should with the base verb.'],
+      ['This result ___ prove the cause on its own.', ['not','is not','does not'],2,'Use does not prove to make the verb negative.'],
+      ['The spike could ___ related to the traffic burst.', ['be','is','being'],0,'Follow could with the base form be.']]],
     ['Пасивний стан у процесах', 'Пасив: be + V3, коли важливіша дія або об’єкт.', [
-      ['The image ___ built by the pipeline.', ['is','does','has'],0,'Is + built — Present Simple passive.'],
-      ['The new version was ___ gradually.', ['release','released','releasing'],1,'Was + V3: released.'],
-      ['Metrics ___ collected every minute.', ['is','be','are'],2,'Metrics — множина: are collected.'],
-      ['We deployed the service. The service ___ deployed yesterday.', ['was','is been','has'],0,'Минуле: was deployed.']]],
+      ['The image ___ built by the pipeline.', ['is','does','has'],0,'Is built is Present Simple passive.'],
+      ['The new version was ___ gradually.', ['release','released','releasing'],1,'Use the past participle released after was.'],
+      ['Metrics ___ collected every minute.', ['is','be','are'],2,'Metrics is plural, so use are collected.'],
+      ['We deployed the service. The service ___ deployed yesterday.', ['was','is been','has'],0,'Use was deployed for a completed past action.']]],
     ['Обов’язок, дозвіл і заборона', 'Must not — заборонено; do not have to — немає необхідності. Should — рекомендація.', [
-      ['You ___ put a secret in public source code.', ['must not','do not have to','may to'],0,'Must not — заборона.'],
-      ['You ___ be an administrator to view this public page.', ['must not','do not have to','cannot to'],1,'Не потрібно — do not have to.'],
-      ['The server ___ check the permission.', ['musts','must to','must'],2,'Must + базова форма.'],
-      ['We should ___ the recovery procedure.', ['test','testing','to test'],0,'Should + test.']]],
+      ['You ___ put a secret in public source code.', ['must not','do not have to','may to'],0,'Must not expresses a prohibition.'],
+      ['You ___ be an administrator to view this public page.', ['must not','do not have to','cannot to'],1,'Do not have to means something is unnecessary.'],
+      ['The server ___ check the permission.', ['musts','must to','must'],2,'Follow must with the base verb.'],
+      ['We should ___ the recovery procedure.', ['test','testing','to test'],0,'Follow should with the base verb test.']]],
     ['Гіпотези та компроміси', 'Для гіпотетичної ситуації: If + Past Simple, would + дієслово. Після by — -ing форма.', [
-      ['If we retried forever, we ___ increase the load.', ['will to','would','would to'],1,'Гіпотетична умова: would + increase.'],
-      ['If the worker ___ after publishing, it might send the event again.', ['crashed','crashes to','would crashed'],0,'У гіпотезі: if + Past Simple.'],
-      ['We could reduce duplicate effects by ___ an event identifier.', ['store','stored','storing'],2,'Після by — -ing.'],
-      ['The design would be simpler if we ___ fewer services.', ['had','would have','has'],0,'У цій if-частині: had.']]]
+      ['If we retried forever, we ___ increase the load.', ['will to','would','would to'],1,'Use would increase for this hypothetical result.'],
+      ['If the worker ___ after publishing, it might send the event again.', ['crashed','crashes to','would crashed'],0,'Use the Past Simple in this hypothetical if-clause.'],
+      ['We could reduce duplicate effects by ___ an event identifier.', ['store','stored','storing'],2,'Follow by with the -ing form storing.'],
+      ['The design would be simpler if we ___ fewer services.', ['had','would have','has'],0,'Use had in this hypothetical if-clause.']]]
   ];
 
   const GRAMMAR_PATTERNS = [
@@ -754,12 +754,12 @@ Circuit breakers|A circuit breaker temporarily stops calls to a failing dependen
       const example=examples[en+'::'+uk]||examples[en];
       if(!example)throw new Error('Missing vocabulary example: '+en);
       const pos = POS_MAP[en] || 'noun / verb';
-      const conceptPrompt = `Write 1–2 sentences using “${en}” (${pos} — ${uk}) to explain how ${title.toLowerCase()} works in a real software team.`;
+      const conceptPrompt = `Write 1–2 sentences using “${en}” (${pos}) to explain how ${title.toLowerCase()} works in a real software team.`;
       return {id:`w${week+1}d${day+1}-v${index+1}`,en,uk,pos,example,conceptPrompt};
     });
     if(COMMUNICATION[week])vocabulary.splice(4,2,...COMMUNICATION[week].map(([en,uk,example],i)=>({
       id:`w${week+1}d${day+1}-c${i+1}`,en,uk,pos:POS_MAP[en]||'phrase',example,
-      conceptPrompt:`Write 1–2 sentences using the phrase “${en}” (${uk}) to discuss an engineering decision or trade-off in ${title.toLowerCase()}.`
+      conceptPrompt:`Write 1–2 sentences using the phrase “${en}” to discuss an engineering decision or trade-off in ${title.toLowerCase()}.`
     })));
     return {title,explanation,scene,problem,action,caveat,vocabulary,contrast:contrast.slice(1),scenarioId:SCENARIOS[title]||null,code:CODE[title]||null};
   }
@@ -939,9 +939,9 @@ Circuit breakers|A circuit breaker temporarily stops calls to a failing dependen
             correct,
             explanation,
             openPrompt:`Task ${i+1} (${pat.label}): Write a complete English sentence about ${card.title.toLowerCase()} using the grammar pattern “${pat.phrase}” and the term “${targetWord}”. Reference pattern: "${prompt.replace('___', options[correct])}"`,
-            instruction:`Write 1 full English sentence applying today's grammar rule (${grammar[0]}) to ${card.title.toLowerCase()}. Do not just type a single word.`,
+            instruction:`Write 1 full English sentence using the grammar pattern above. Connect the sentence to ${card.title.toLowerCase()}.`,
             targetForm:`${pat.phrase} (e.g., use "${options[correct]}" + "${targetWord}")`,
-            hint:`Grammar focus: ${pat.uk}. Model form: "${prompt.replace('___', options[correct])}".`,
+            hint:`${explanation} Model form: "${prompt.replace('___', options[correct])}".`,
             example:pat.example
           };
         })

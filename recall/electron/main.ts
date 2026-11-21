@@ -1,5 +1,7 @@
+import {trackDuration,validDurations,type TrackProgress} from '../src/core/tracks';
 import {app,BrowserWindow,Menu,Tray,nativeImage,ipcMain,powerMonitor,Notification,screen,shell,dialog,protocol,net,globalShortcut} from 'electron';
 import {readFile,stat} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -9,15 +11,17 @@ import {SQLChat} from './sql-chat';
 import type {Bootstrap,ModuleState,ScheduleState,SessionRecord,Settings} from '../src/core/contracts';
 import {getModule} from '../src/modules/registry';
 import {tickSchedule,snoozeSchedule,WARNING_MS,needsWarning,automaticDayAllowed,hasFinishedToday,completeScheduleForDay} from '../src/core/scheduler';
-import {createSession,updateHistory,canSurrender,addSpeedBonus,isStaleSessionUpdate,availableTopicIds,learnedTopics} from '../src/core/session';
+import {createSession,updateHistory,canSurrender,sqlDuration,addSpeedBonus,isStaleSessionUpdate,availableTopicIds,learnedTopics} from '../src/core/session';
 import {dayKey,kyivDayKey,kyivParts} from '../src/core/calendar';
 import {FocusClock} from '../src/core/learning';
 import {EnglishHost} from './english-host';
+import type {EnglishView} from '../src/modules/english/types';
 import {EnglishSpeech} from './english-speech';
 import AI from '../integration/english-ai.cjs';
 import AIPrompts from '../integration/english-ai-prompts.cjs';
 import Coaching from '../integration/english-coaching.cjs';
 import Translation from '../integration/english-translation.cjs';
+import ReviewGroups from '../../english/review-groups.cjs';
 import * as EnglishCourse from '../src/modules/english/vendor/course';
 import * as EnglishLearning from '../src/modules/english/vendor/learning';
 import Language from '../integration/english-language.cjs';
@@ -34,6 +38,22 @@ import {migrateLegacyStatistics} from './migrate';
 const demo=process.argv.includes('--demo');
 const smoke=process.argv.includes('--smoke');
 const projectRoot=path.resolve(__dirname,'..');
+function setRecallLoginItem(openAtLogin:boolean){
+  const name='SQL Recall';
+  if(process.platform==='win32'){
+    const executableDir=path.dirname(process.execPath);
+    const roots=app.isPackaged?[path.resolve(executableDir,'..','..'),path.resolve(executableDir,'..','..','..')]:[projectRoot];
+    const launcher=roots.map(root=>path.join(root,'scripts','launch-recall.ps1')).find(existsSync);
+    const powershell=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
+    if(launcher&&existsSync(powershell)){
+      app.setLoginItemSettings({name,openAtLogin,path:powershell,args:[
+        '-NoLogo','-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',launcher,'-Background',
+      ]});
+      return;
+    }
+  }
+  app.setLoginItemSettings({name,openAtLogin,path:process.execPath,args:['--background']});
+}
 if(demo||smoke)app.setPath('userData',path.join(app.getPath('temp'),`sql-recall-browser-${process.pid}`));
 protocol.registerSchemesAsPrivileged([{scheme:'recall',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true,stream:true}}]);
 let store:Store,settings:Settings,moduleState:ModuleState,schedule:ScheduleState,sessions:SessionRecord[]=[];
@@ -69,7 +89,7 @@ function updateTray(){
 }
 let warningPanel:WarningPanel,shortcutAvailable=false,warningPreview=false,previewUntil=0,snoozing=false;
 const SNOOZE_SHORTCUT='Control+Shift+A';
-const launchLock=demo||app.requestSingleInstanceLock();
+const launchLock=demo||smoke||app.requestSingleInstanceLock();
 if(!launchLock)app.quit();
 app.on('second-instance',()=>showDashboard());
 function emit(type:'daily'|'progress'|'practice'|'tick'|'pause'|'schedule'|'english',active?:boolean,clockValue?:{id:string;activeMs:number;taskElapsedMs:number[];breakRemainingMs?:number}){window?.webContents.send('recall:event',{type,active,clock:clockValue});}
@@ -155,6 +175,7 @@ async function begin(mode:SessionRecord['mode'],notify=true){
   const module=getModule(settings.activeModuleId);
   if(!availableTopicIds(moduleState).length){showDashboard();return;}
   activeSession=createSession(module,moduleState,sessions,dayKey(new Date()),mode);
+  activeSession.durationMinutes=trackDuration('postgresql',settings.durationMinutes);
   const tasks=activeSession.tasks;
   tasks.forEach((task,index)=>{tasks[index]=sqlAI.take(task,availableTopicIds(moduleState),sessions,tasks.filter((_,other)=>other!==index));});
   activeSession.answers=tasks.map(t=>t.starter);
@@ -180,21 +201,31 @@ async function pollProgress(){
   try{const progress=getModule(settings.activeModuleId).progressAdapter.parse(source);moduleState={...moduleState,progress};await store.write(`modules/${settings.activeModuleId}/state.json`,moduleState);sourceStamp=stamp;emit('progress');}
   catch(error){const message=String(error);if(!store.messages.includes(message))store.messages.push(message);sourceStamp=stamp;emit('progress');}
 }
-async function bootstrap():Promise<Bootstrap>{await pollProgress();return {settings,module:moduleState,schedule,sessions,demo,sqlAI:sqlAI?.status(),recoveryMessages:store.messages,activeSession:activeSession&&!activeSession.endedAt?activeSession:null,shortcutAvailable,english:englishHost?{...englishHost.view(),aiSettings:englishAI?.settings()}:undefined,activeLearningSession:englishNative?englishHost.controller.snapshot():activeSession&&!activeSession.endedAt?getModule(activeSession.moduleId).controller?.restore(activeSession).snapshot():null};}
-async function beginEnglish(mode:'daily'|'practice'|'demo'='practice',notify=true,extend=false){
+async function trackProgress():Promise<TrackProgress>{
+  const module=getModule('postgresql');
+  englishHost?.refresh();
+  const english=englishHost?.controller.courseProgress();
+  return {
+    postgresql:{done:availableTopicIds(moduleState).length,total:module.catalog.length},
+    english:english??null,
+    nodejs:await nodeNight?.progress()??null,
+  };
+}
+async function bootstrap():Promise<Bootstrap>{await pollProgress();return {settings,tracks:await trackProgress(),module:moduleState,schedule,sessions,demo,sqlAI:sqlAI?.status(),recoveryMessages:store.messages,activeSession:activeSession&&!activeSession.endedAt?activeSession:null,shortcutAvailable,english:englishHost?{...englishHost.view(),aiSettings:englishAI?.settings()}:undefined,activeLearningSession:englishNative?englishHost.controller.snapshot():activeSession&&!activeSession.endedAt?getModule(activeSession.moduleId).controller?.restore(activeSession).snapshot():null};}
+async function beginEnglish(mode:'daily'|'practice'|'demo'='practice',notify=true,extend=false,lessonId?:string){
   if(nodeNight?.busy)throw Error('Нічний Node.js уже відкрито.');
   if(activeSession&&!activeSession.endedAt&&!activeSession.paused){showDashboard();throw new Error('Спочатку заверши або збережи SQL-сесію.');}
-  if(englishHost.readonly()){showDashboard();throw new Error('English зараз відкрито в браузері. Постав його там на паузу.');}
+  if(englishHost.readonly()){showDashboard();throw new Error('English is open in your browser. Pause it there to continue here.');}
   if(englishNative&&englishHost.running()){showDashboard();return;}
-  hideWarning();disarmShortcut();englishHost.start(demo?'demo':mode,extend);
+  hideWarning();disarmShortcut();englishHost.start(demo?'demo':mode,extend,lessonId);
   const run=englishHost.controller.snapshot();if(!run||run.endedAt||!englishHost.running()){englishHost.release();showDashboard();if(notify)emit('english');return;}
   englishNative=true;prepareFocusWindow(run.id);void languageChecker.check('This is a short English warm-up.').catch(()=>{});if(notify)emit('english');
 }
 function installEnglish(){if(!demo&&!smoke)try{EnglishInstaller.installEnglish(settings.englishCoursePath!,store.root,path.join(projectRoot,'integration'),path.join(app.isPackaged?process.resourcesPath:path.join(projectRoot,'resources'),'english-checker'));}catch(error){const message='English: '+String(error);if(!store.messages.includes(message))store.messages.push(message);}}
-async function openEnglish(){
+async function openEnglish(ruleId?:string){
   installEnglish();try{let running=false;try{const result=await fetch('http://localhost:5500/api/recall/status',{signal:AbortSignal.timeout(1200)}).then(r=>r.json()) as any;running=result.moduleId==='english';}catch{}
     if(!running){const child=spawn(process.execPath,[path.join(settings.englishCoursePath!,'server.js')],{cwd:settings.englishCoursePath,detached:true,windowsHide:true,stdio:'ignore',env:{...process.env,ELECTRON_RUN_AS_NODE:'1'}});child.on('error',()=>{});child.unref();}
-    await shell.openExternal('http://localhost:5500');return {ok:true,message:'English відкрито. Прогрес і записи синхронізуються з постійною папкою Recall. Якщо сервер щойно запускається, онови сторінку.'};
+    await shell.openExternal('http://localhost:5500'+(ruleId?'/?rule='+encodeURIComponent(ruleId):''));return {ok:true,message:'English opened in your browser. Recall syncs your progress and recordings. Refresh the page if the server is still starting.'};
   }catch(error){return {ok:false,message:String(error)};}
 }
 async function openCourse(){
@@ -211,20 +242,26 @@ async function openCourse(){
 async function installHandlers(){
   const handle=(name:string,handler:(...args:any[])=>unknown)=>ipcMain.handle(name,(event,...args)=>{const allowedWarning=['recall:warning-status','recall:snooze','recall:start-now'].includes(name)&&event.sender===warningPanel?.window?.webContents;if(event.sender!==window?.webContents&&!allowedWarning)throw new Error('Невідоме вікно.');return handler(...args);});
   handle('recall:bootstrap',bootstrap);
+  handle('recall:track-progress',trackProgress);
+  handle('recall:configure-durations',async(value:unknown)=>{
+    if(!validDurations(value))throw Error('Задай тривалість у цілих хвилинах у межах поля.');
+    settings={...settings,durationMinutes:{...settings.durationMinutes,...value}};
+    await store.write('settings.json',settings);
+  });
   handle('recall:sql-ai',async(request:any)=>{if(!request||!['settings','prepare','test'].includes(request.action))throw Error('Невідома SQL AI-дія.');if(request.action==='settings')return request.options?sqlAI.save(request.options):sqlAI.status();if(request.action==='test')return sqlAI.test();await sqlAI.prepare(moduleState,sessions,true);return sqlAI.status();});
   handle('recall:sql-chat',(request:unknown)=>sqlChat.ask(activeSession,request));
-  handle('recall:configure',async(value:{autoStart:boolean;minPracticeMinutes?:number})=>{if(!value||typeof value.autoStart!=='boolean'||value.minPracticeMinutes!==undefined&&![5,7,10,15].includes(value.minPracticeMinutes))throw new Error('Некоректні налаштування.');if(!settings.setupComplete){returnSignal=true;settings.dailyEnabledAfterDay=dayKey(new Date());}settings={...settings,setupComplete:true,autoStart:demo||smoke?false:value.autoStart,minPracticeMinutes:value.minPracticeMinutes??settings.minPracticeMinutes};if(!demo&&!smoke)app.setLoginItemSettings({openAtLogin:settings.autoStart,path:process.execPath,args:['--background'],name:'SQL Recall'});await store.write('settings.json',settings);});
+  handle('recall:configure',async(value:{autoStart:boolean;minPracticeMinutes?:number})=>{if(!value||typeof value.autoStart!=='boolean'||value.minPracticeMinutes!==undefined&&![5,7,10,15].includes(value.minPracticeMinutes))throw new Error('Некоректні налаштування.');if(!settings.setupComplete){returnSignal=true;settings.dailyEnabledAfterDay=dayKey(new Date());}settings={...settings,setupComplete:true,autoStart:demo||smoke?false:value.autoStart,minPracticeMinutes:value.minPracticeMinutes??settings.minPracticeMinutes};if(!demo&&!smoke)setRecallLoginItem(settings.autoStart);await store.write('settings.json',settings);});
   handle('recall:session-ready',async(sessionId:unknown)=>{const sql=activeSession&&sessionId===activeSession.id&&!activeSession.paused&&!activeSession.endedAt,en=englishNative&&sessionId===englishHost.controller.snapshot()?.id&&englishHost.running();if(typeof sessionId!=='string'||sessionId!==pendingFocusId||!sql&&!en)return;clearPendingFocus();systemEnding=false;focusSurface=true;clock.reset();applyOverlays();});
-  handle('recall:english-start',async(extend:unknown)=>{if(extend!==undefined&&typeof extend!=='boolean')throw Error('Некоректний режим English.');await beginEnglish('practice',false,extend===true);return englishHost.view();});
+  handle('recall:english-start',async(extend:unknown,lessonId:unknown)=>{if(extend!==undefined&&typeof extend!=='boolean'||lessonId!==undefined&&(typeof lessonId!=='string'||!/^[\w-]{1,80}$/.test(lessonId)))throw Error('Invalid English mode.');await beginEnglish('practice',false,extend===true,lessonId as string|undefined);return englishHost.view();});
   handle('recall:english-pause-extension',()=>{
-    if(!englishNative||!englishHost.running()||!englishHost.controller.snapshot()?.payload.extraPractice)throw Error('Допрацювання English не активне.');
+    if(!englishNative||!englishHost.running()||!englishHost.controller.snapshot()?.payload.extraPractice)throw Error('Extra English practice is not active.');
     englishHost.pause();englishNative=false;tearingDown=true;clearOverlays();tearingDown=false;return englishHost.view();
   });
-  handle('recall:english-action',async(action:any)=>{if(!action||typeof action.type!=='string'||action.type.length>60||action.key!==undefined&&typeof action.key!=='string'||action.value!==undefined&&typeof action.value!=='string'||action.flag!==undefined&&typeof action.flag!=='boolean'||action.area!==undefined&&typeof action.area!=='string')throw new Error('Некоректна дія English.');if(action.type==='snooze'){if(!focusTaskActive()){warningModule='english';await snoozeDaily();}return englishHost.view();}return englishHost.action(action);});
+  handle('recall:english-action',async(action:any)=>{if(!action||typeof action.type!=='string'||action.type.length>60||action.key!==undefined&&typeof action.key!=='string'||action.value!==undefined&&typeof action.value!=='string'||action.flag!==undefined&&typeof action.flag!=='boolean'||action.area!==undefined&&typeof action.area!=='string')throw new Error('Invalid English action.');if(action.type==='snooze'){if(!focusTaskActive()){warningModule='english';await snoozeDaily();}return englishHost.view();}return englishHost.action(action);});
   handle('recall:english-finish',async(reason:unknown)=>{if(reason!=='surrendered'&&reason!=='completed')throw new Error('Некоректне завершення.');englishHost.finish(reason);englishNative=false;tearingDown=true;clearOverlays();tearingDown=false;englishSchedule.finished=true;await store.write('schedules/english.json',englishSchedule);emit('english');return englishHost.view();});
-  handle('recall:english-configure',async(value:any)=>{if(!value||typeof value.enabled!=='boolean'||!Number.isInteger(value.startHour)||value.startHour<17||value.startHour>22)throw new Error('Некоректний розклад English.');if(value.enabled){const today=kyivDayKey(new Date());if(!settings.englishEnabledAfterDay||settings.englishEnabledAfterDay>=today){const previous=new Date(today+'T12:00:00Z');previous.setUTCDate(previous.getUTCDate()-1);settings.englishEnabledAfterDay=previous.toISOString().slice(0,10);}}const hour=kyivParts(new Date()).hour;if(warningModule==='english'&&(!value.enabled||hour>=5&&hour<value.startHour)){hideWarning();disarmShortcut();englishSchedule.offered=false;}settings.englishEnabled=value.enabled;settings.englishStartHour=value.startHour;await store.write('settings.json',settings);});
-  handle('recall:english-open',openEnglish);
-  handle('recall:english-import',async()=>{const result=await dialog.showOpenDialog(window!,{title:'Імпортувати English Daily',filters:[{name:'JSON',extensions:['json']}],properties:['openFile']});if(result.canceled)return {ok:false,message:'Імпорт скасовано.'};try{if((await stat(result.filePaths[0])).size>20000000)throw new Error('Файл перевищує 20 МБ.');englishHost.import(JSON.parse(await readFile(result.filePaths[0],'utf8')));emit('english');return {ok:true,message:'Прогрес English імпортовано. Резервну копію збережено.'};}catch(error){return {ok:false,message:String(error)};}});
+  handle('recall:english-configure',async(value:any)=>{if(!value||typeof value.enabled!=='boolean'||!Number.isInteger(value.startHour)||value.startHour<17||value.startHour>22)throw new Error('Invalid English schedule.');if(value.enabled){const today=kyivDayKey(new Date());if(!settings.englishEnabledAfterDay||settings.englishEnabledAfterDay>=today){const previous=new Date(today+'T12:00:00Z');previous.setUTCDate(previous.getUTCDate()-1);settings.englishEnabledAfterDay=previous.toISOString().slice(0,10);}}const hour=kyivParts(new Date()).hour;if(warningModule==='english'&&(!value.enabled||hour>=5&&hour<value.startHour)){hideWarning();disarmShortcut();englishSchedule.offered=false;}settings.englishEnabled=value.enabled;settings.englishStartHour=value.startHour;await store.write('settings.json',settings);});
+  handle('recall:english-open',(id:unknown)=>{if(id!==undefined&&(typeof id!=='string'||!/^[a-z0-9.-]{3,100}$/.test(id)))throw Error('Invalid review rule.');return openEnglish(id as string|undefined);});
+  handle('recall:english-import',async()=>{const result=await dialog.showOpenDialog(window!,{title:'Import English Daily',filters:[{name:'JSON',extensions:['json']}],properties:['openFile']});if(result.canceled)return {ok:false,message:'Import cancelled.'};try{if((await stat(result.filePaths[0])).size>20000000)throw new Error('The file is larger than 20 MB.');englishHost.import(JSON.parse(await readFile(result.filePaths[0],'utf8')));emit('english');return {ok:true,message:'English progress imported. A backup was saved.'};}catch(error){return {ok:false,message:String(error)};}});
   handle('recall:english-audio-save',(key:string,bytes:number[],mime:string)=>englishHost.saveAudio(key,bytes,mime));
   handle('recall:english-audio-load',(key:string)=>englishHost.loadAudio(key));
   handle('recall:english-translate',async(request:any)=>translator.handle(request));
@@ -239,6 +276,20 @@ async function installHandlers(){
 
   handle('recall:english-ai',async(request:any)=>{
     if(!request||typeof request.action!=='string')throw Error('Invalid AI request.');
+    if(request.action==='review-groups'||request.action==='review-group-ai'){
+      englishHost.refresh();
+      const repo=ReviewGroups.open(store.root);
+      const state=ReviewGroups.ingest(repo,ReviewGroups.collect(englishHost.controller.document,path.join(store.root,'modules','english','ai-reports')));
+      let grouped={state,message:undefined as string|undefined};
+      if(request.action==='review-group-ai'){
+        try{grouped=await ReviewGroups.group(repo,(prompt:{system:string;user:string;maxOutputTokens:number;signal:AbortSignal})=>Translation.eligibleText(englishAI,prompt));}
+        catch{grouped.message='An eligible provider did not respond. Your existing groups are available.';}
+      }
+      const local=process.env.LOCALAPPDATA;
+      const browser=local&&!demo&&!smoke?ReviewGroups.readJSON(path.join(local,'English Daily','review','state.json')):null;
+      const groups:NonNullable<EnglishView['reviewGroups']>=ReviewGroups.rank([...browser?.observations??[],...grouped.state.observations],browser?.results||[],grouped.state.aliases);
+      return {groups:groups.map(({id,title,rule,count,total,maintained,evidence})=>({id,title,rule,count,total,maintained,evidence})),message:grouped.message};
+    }
     if(request.action==='settings')return {settings:request.options?englishAI.save(request.options):englishAI.settings()};
     if(request.action==='test')return englishAI.testConnection(request.provider);
     if(request.action==='models')return {models:await englishAI.models(request.provider)};
@@ -296,7 +347,7 @@ async function installHandlers(){
     }
     if(request.action==='conclusion'){if(!s)throw Error('Resume your lesson first.');bundle.evidenceMode=['grammar','listening'].includes(area)&&!(s.aiAssessments as any)?.[area]?'closed-choice':'original-responses';bundle.listeningUnavailable=!!s.listeningUnavailable;const result=await englishAI.conclude(bundle,Coaching.summaryRows(bundle,s));return {...result,view:englishHost.aiChange(c=>{const current=c.document.course.activeSession;if(!current||current.id!==s.id)throw Error('The active lesson changed.');const latest=(EnglishLearning as any).areaItems(current,area).map((a:any)=>({...a,text:current.answers[a.key]||''}));Coaching.attachSummary(current,area,result.blockSummary,latest);},true)};}
     if(request.action==='grade'){
-englishHost.controller.assessmentBundle(area);const result=await englishAI.grade(bundle);await store.write('modules/english/ai-reports/'+Date.now()+'-'+area+'.json',result.assessment);return {...result,view:englishHost.aiChange(c=>c.acceptAI(result.assessment),true)};}throw Error('Unknown AI action.');
+englishHost.controller.assessmentBundle(area);const result=await englishAI.grade(bundle);const view=englishHost.aiChange(c=>{if(area!=='practice'&&c.document.course.activeSession?.id!==s?.id)throw Error('The active lesson changed.');c.acceptAI(result.assessment);},true);if(s&&area!=='practice')await store.write('modules/english/ai-reports/'+Date.now()+'-'+area+'.json',{...result.assessment,attemptId:s.id});return {...result,view};}throw Error('Unknown AI action.');
   });
 
   handle('recall:english-language-check',async(request:any)=>{if(!request||typeof request.key!=='string'||request.attemptId!==undefined&&(typeof request.attemptId!=='string'||! /^[\w-]{1,150}$/.test(request.attemptId)))throw new Error('Invalid language-check request.');const target=englishHost.controller.languageTarget(request.key,request.attemptId);const report=await languageChecker.check(target.text);await store.write(`modules/english/language-checks/${Date.now()}-${Math.random().toString(36).slice(2,9)}.json`,{version:1,moduleId:'english',...target,report});if(englishHost.running()&&englishHost.controller.document.course.activeSession?.id===target.attemptId)englishHost.acceptLanguageCheck(target.key,report);return {view:englishHost.view(),report};});
@@ -314,21 +365,21 @@ englishHost.controller.assessmentBundle(area);const result=await englishAI.grade
   });
   handle('recall:start',async(mode:unknown)=>{if(mode!=='practice'&&mode!=='demo')throw new Error('Некоректний режим.');await begin(demo?'demo':'practice',false);return bootstrap();});
   handle('recall:sql-draft',(id:unknown,index:unknown,answer:unknown)=>{if(typeof id!=='string'||id!==activeSession?.id||activeSession.endedAt||!Number.isInteger(index)||typeof index!=='number'||index<0||index>=activeSession.tasks.length||typeof answer!=='string'||answer.length>100000)throw new Error('Некоректна SQL-чернетка.');activeSession.answers[index]=answer;});
-  handle('recall:save-session',async(session:SessionRecord)=>{if(!validSession(session)||session.id!==activeSession?.id||session.moduleId!==activeSession.moduleId||activeSession.endedAt)throw new Error('Сесія недоступна.');if(isStaleSessionUpdate(activeSession,session))return;session.activeMs=activeSession.activeMs;session.taskElapsedMs=[...activeSession.taskElapsedMs];session.paused=activeSession.paused;activeSession=session;await store.saveSession(session);});
+  handle('recall:save-session',async(session:SessionRecord)=>{if(!validSession(session)||session.id!==activeSession?.id||session.moduleId!==activeSession.moduleId||activeSession.endedAt)throw new Error('Сесія недоступна.');if(isStaleSessionUpdate(activeSession,session))return;session.activeMs=activeSession.activeMs;session.durationMinutes=activeSession.durationMinutes;session.taskElapsedMs=[...activeSession.taskElapsedMs];session.paused=activeSession.paused;activeSession=session;await store.saveSession(session);});
   handle('recall:extend-session',async(session:SessionRecord)=>{
     if(!validSession(session)||session.id!==activeSession?.id||session.moduleId!==activeSession.moduleId||activeSession.endedAt)throw new Error('Сесія недоступна.');
     if(isStaleSessionUpdate(activeSession,session))return activeSession;
-    session.activeMs=activeSession.activeMs;session.taskElapsedMs=[...activeSession.taskElapsedMs];session.paused=activeSession.paused;
-    addSpeedBonus(getModule(session.moduleId),moduleState,sessions,session,settings.minPracticeMinutes,new Date(),Math.floor(Math.random()*0xffffffff),settings.sqlLearningBonus!==false);
+    session.activeMs=activeSession.activeMs;session.durationMinutes=activeSession.durationMinutes;session.taskElapsedMs=[...activeSession.taskElapsedMs];session.paused=activeSession.paused;
+    addSpeedBonus(getModule(session.moduleId),moduleState,sessions,session,Math.min(settings.minPracticeMinutes,sqlDuration(session)),new Date(),Math.floor(Math.random()*0xffffffff),settings.sqlLearningBonus!==false);
     if(session.tasks.length>activeSession.tasks.length){const i=session.tasks.length-1;session.tasks[i]=sqlAI.take(session.tasks[i],availableTopicIds(moduleState),sessions,session.tasks.slice(0,i));session.answers[i]=session.tasks[i].starter;}
     activeSession=session;await store.saveSession(session);return session;
   });
   handle('recall:finish-session',async(session:SessionRecord)=>{
     if(!validSession(session)||session.id!==activeSession?.id||session.moduleId!==activeSession.moduleId||!['completed','surrendered','technical'].includes(session.outcome||''))throw new Error('Некоректне завершення.');
-    session.activeMs=activeSession.activeMs;session.taskElapsedMs=[...activeSession.taskElapsedMs];
+    session.activeMs=activeSession.activeMs;session.durationMinutes=activeSession.durationMinutes;session.taskElapsedMs=[...activeSession.taskElapsedMs];
     if(session.outcome==='completed'&&!session.solved.every(Boolean))throw new Error('Ще не всі вправи завершені.');
     if(session.outcome==='completed'&&session.tasks.length!==activeSession.tasks.length)throw new Error('Онови поточну вправу перед завершенням.');
-    if(session.outcome==='surrendered'&&!canSurrender(session))throw new Error('Завершення без виконання стане доступним через 15 хвилин.');
+    if(session.outcome==='surrendered'&&!canSurrender(session))throw new Error(`Завершення без виконання доступне після ${sqlDuration(session)} хв практики.`);
     if(!session.endedAt)session.endedAt=new Date().toISOString();await finish(session);
   });
 }
@@ -338,7 +389,7 @@ async function tick(){
     const now=new Date();const idle=powerMonitor.getSystemIdleTime();const active=!locked&&!suspended&&(idle<300||mediaUntil>Date.now());
     void nodeNight?.tick(now,!locked&&!suspended&&idle<300);
     const elapsed=clock.sample(performance.now(),active&&!pendingFocusId&&!!window?.isFocused()&&waitingUntil<Date.now());
-    if(englishNative){const before=englishHost.controller.snapshot();const oldPhase=before?.payload.phase;englishHost.tick(elapsed,active);const run=englishHost.controller.snapshot();if(run?.endedAt){englishHost.release();englishNative=false;tearingDown=true;clearOverlays();tearingDown=false;englishSchedule.finished=true;await store.write('schedules/english.json',englishSchedule);emit('english');}else if(oldPhase!==run?.payload.phase)emit('english');}
+    if(englishNative){const before=englishHost.controller.snapshot();const oldPhase=before?.payload.phase,oldOvertime=before?.payload.overtimeBlock;englishHost.tick(elapsed,active);const run=englishHost.controller.snapshot();if(run?.endedAt){englishHost.release();englishNative=false;tearingDown=true;clearOverlays();tearingDown=false;if(englishHost.done()){englishSchedule.finished=true;await store.write('schedules/english.json',englishSchedule);}emit('english');}else if(oldPhase!==run?.payload.phase||oldOvertime!==run?.payload.overtimeBlock)emit('english');}
     else if(activeSession&&!activeSession.endedAt&&!activeSession.paused)getModule(activeSession.moduleId).controller?.restore(activeSession).tick(elapsed,{active});
     const returned=returnSignal||previousIdle>=1800&&idle<5;returnSignal=false;previousIdle=idle;
     if(warningPreview){
@@ -359,7 +410,7 @@ async function tick(){
       if(result.action==='start'){hideWarning();disarmShortcut();await beginEnglish('daily');}
       if(warningModule==='english'&&(!active||taskBusy()||englishHost.readonly()||englishSchedule.finished||!englishSchedule.offered||englishSchedule.snoozedUntil)){hideWarning();disarmShortcut();}
     }else if(warningModule==='english'){hideWarning();disarmShortcut();}
-    if(englishNative){const run=englishHost.controller.snapshot()!;emit('tick',active,{id:run.id,activeMs:run.payload.extraPractice?run.activeMs:englishHost.controller.day().activeMs,taskElapsedMs:[],breakRemainingMs:run.payload.breakRemainingMs});}
+    if(englishNative){const run=englishHost.controller.snapshot()!;emit('tick',active,{id:run.id,activeMs:run.payload.extraPractice||run.payload.revisit?run.activeMs:englishHost.controller.day().activeMs,taskElapsedMs:[],breakRemainingMs:run.payload.breakRemainingMs});}
     else if(activeSession&&!activeSession.endedAt){emit('tick',!locked&&!suspended&&!activeSession.paused,{id:activeSession.id,activeMs:activeSession.activeMs,taskElapsedMs:[...activeSession.taskElapsedMs]});sessionTick=now.getTime();}
     if(now.getTime()-lastPersist>15000){
       lastPersist=now.getTime();
@@ -388,11 +439,11 @@ if(launchLock)void app.whenReady().then(async()=>{
   const aiEnv=demo||smoke?{}:readRecallAiEnv(projectRoot,app.isPackaged);
   sessions=await store.sessions();
   settings=await store.settings(coursePath);settings.statisticsPath=store.root;settings.coursePath=coursePath;settings.englishCoursePath=await resolveEnglishPath(projectRoot,app.isPackaged,settings.englishCoursePath);
-  const checkerRoot=path.join(app.isPackaged?process.resourcesPath:path.join(projectRoot,'resources'),'english-checker');englishAI=new AI.EnglishAI({statisticsPath:store.root,legacyConfigPath:demo||smoke?undefined:path.join(settings.englishCoursePath!,'.english-daily-private.json'),env:aiEnv});translator=new Translation.EnglishTranslation({root:store.root,ai:englishAI,glossary:EnglishCourse.lessons.flatMap((l:any)=>l.vocabulary)});languageChecker=new Language.OfflineEnglishChecker({root:checkerRoot,workerFile:app.isPackaged?path.join(checkerRoot,'service-worker.cjs'):path.join(projectRoot,'integration','english-language.cjs'),nodePath:process.execPath});
-  englishHost=new EnglishHost(store.root);englishHost.recover();englishSpeech=new EnglishSpeech(path.join(store.root,'modules','english','speech-cache'));englishSchedule=await store.read('schedules/english.json',eveningSchedule(new Date()),(v:any)=>v?.version===1&&/^\d{4}-\d{2}-\d{2}$/.test(v.dayKey)&&typeof v.finished==='boolean'&&typeof v.offered==='boolean'&&Number.isFinite(v.lastTick)&&Number.isFinite(v.warningRemainingMs)&&v.warningRemainingMs>=0&&v.warningRemainingMs<=WARNING_MS&&(v.snoozedUntil===undefined||Number.isFinite(v.snoozedUntil)));installEnglish();
+  const checkerRoot=path.join(app.isPackaged?process.resourcesPath:path.join(projectRoot,'resources'),'english-checker');englishAI=new AI.EnglishAI({statisticsPath:store.root,legacyConfigPath:demo||smoke?undefined:path.join(settings.englishCoursePath!,'.english-daily-private.json'),env:aiEnv});translator=new Translation.EnglishTranslation({root:store.root,ai:englishAI,glossary:Translation.courseGlossary(EnglishCourse.lessons)});languageChecker=new Language.OfflineEnglishChecker({root:checkerRoot,workerFile:app.isPackaged?path.join(checkerRoot,'service-worker.cjs'):path.join(projectRoot,'integration','english-language.cjs'),nodePath:process.execPath});
+  englishHost=new EnglishHost(store.root,undefined,()=>trackDuration('english',settings.durationMinutes));englishHost.recover();englishSpeech=new EnglishSpeech(path.join(store.root,'modules','english','speech-cache'));englishSchedule=await store.read('schedules/english.json',eveningSchedule(new Date()),(v:any)=>v?.version===1&&/^\d{4}-\d{2}-\d{2}$/.test(v.dayKey)&&typeof v.finished==='boolean'&&typeof v.offered==='boolean'&&Number.isFinite(v.lastTick)&&Number.isFinite(v.warningRemainingMs)&&v.warningRemainingMs>=0&&v.warningRemainingMs<=WARNING_MS&&(v.snoozedUntil===undefined||Number.isFinite(v.snoozedUntil)));installEnglish();
   if(!demo&&!smoke){
     try{await configureCourseStorage(getModule(settings.activeModuleId),coursePath,store.root,path.join(projectRoot,'integration'));}catch(error){store.messages.push('Не вдалося підключити тренажер: '+String(error));}
-    if(settings.setupComplete)app.setLoginItemSettings({openAtLogin:settings.autoStart,path:process.execPath,args:['--background'],name:'SQL Recall'});
+    if(settings.setupComplete)setRecallLoginItem(settings.autoStart);
   }
   await store.write('settings.json',settings);
   moduleState=await store.module(settings.activeModuleId);schedule=await store.schedule();
@@ -406,6 +457,7 @@ if(launchLock)void app.whenReady().then(async()=>{
   nodeNight=new NodeNight({
     store, coursePath:await resolveNodePath(projectRoot,app.isPackaged,settings.coursePath), preloadRoot:__dirname, englishAI,
     separateApiKey:aiEnv.NODE_OPENAI_API_KEY,
+    durationMinutes:()=>trackDuration('nodejs',settings.durationMinutes),
     isolated:demo||smoke,
     testPort:demo&&process.env.RECALL_TEST_CLOCK==='1'?Number(process.env.RECALL_TEST_NODE_PORT):undefined,
     exerciseGuard:demo&&process.env.RECALL_TEST_NODE_GUARD==='1',
@@ -432,7 +484,7 @@ if(launchLock)void app.whenReady().then(async()=>{
   screen.on('display-added',()=>{nodeNight?.displaysChanged();if(focusSurface){tearingDown=true;applyOverlays();tearingDown=false;}});
   screen.on('display-removed',()=>{nodeNight?.displaysChanged();if(focusSurface){tearingDown=true;applyOverlays();tearingDown=false;}});
   await installHandlers();makeWindow();
-  window!.webContents.session.setPermissionRequestHandler((contents,permission,callback,details)=>{if(contents!==window?.webContents||permission!=='media'||!contents.getURL().startsWith('recall://app/')){callback(false);return;}const media=(details as any).mediaTypes||[];if(media.includes('video')){callback(false);return;}void dialog.showMessageBox(window!,{type:'question',message:'Дозволити запис голосу для English?',detail:'Запис збережеться локально. Камера не використовується.',buttons:['Дозволити','Ні'],defaultId:1,cancelId:1}).then(result=>callback(result.response===0));});
+  window!.webContents.session.setPermissionRequestHandler((contents,permission,callback,details)=>{if(contents!==window?.webContents||permission!=='media'||!contents.getURL().startsWith('recall://app/')){callback(false);return;}const media=(details as any).mediaTypes||[];if(media.includes('video')){callback(false);return;}void dialog.showMessageBox(window!,{type:'question',message:'Allow microphone access for English?',detail:'Recall saves your recording locally.',buttons:['Allow','Decline'],defaultId:1,cancelId:1}).then(result=>callback(result.response===0));});
   if(demo&&process.env.RECALL_TEST_CLOCK==='1')Object.assign(globalThis,{__recallAdvance:(ms:number)=>{for(let left=ms;left>0;left-=5000){const delta=Math.min(left,5000);if(englishNative)englishHost.tick(delta,true);else if(activeSession&&!activeSession.endedAt)getModule('postgresql').controller!.restore(activeSession).tick(delta,{active:true});}if(englishNative){englishHost.save();if(englishHost.controller.snapshot()?.endedAt){englishHost.release();englishNative=false;clearOverlays();emit('english');}}}});
   if(!demo){
     const icon=nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR42mMQ0NX8TwlmGDVg1IBRA0YNAOcGAJqEnwEiEb2gAAAAAElFTkSuQmCC');

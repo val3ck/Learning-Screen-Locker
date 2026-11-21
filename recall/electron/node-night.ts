@@ -1,10 +1,14 @@
 import { app, BrowserWindow, ipcMain, screen, shell, type IpcMainInvokeEvent } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { nightPlan } from '../../nodejs/src/lib/night-plan';
+import { parseProgress } from '../../nodejs/src/lib/progress';
+import { defaultDuration, minuteMs } from '../src/core/tracks';
 import path from 'node:path';
 import {
-  invitationNight, NIGHT_LIMIT, nextNightStep, reviewNightProgress, validNightDocument,
+  invitationNight, nextNightStep, reviewNightProgress, validNightDocument,
   type CourseNight, type NightDocument, type NightRun,
 } from '../src/core/node-night';
 import { FocusGuard } from './focus-guard';
@@ -57,12 +61,31 @@ export class NodeNight {
     isolated: boolean; isAvailable: () => boolean; onStatus: () => void; report: (message: string) => void;
     beforeOffer: () => void;
     shutdown?: () => Promise<void>;
-    exerciseGuard?: boolean; testPort?: number; separateApiKey?: string;
+    exerciseGuard?: boolean; testPort?: number; separateApiKey?: string; durationMinutes?: () => number;
   }) {
     this.ai = new NodeNightAI(options.store, options.englishAI, options.isolated, options.separateApiKey);
     const port = options.testPort;
     this.origin = options.isolated && Number.isInteger(port) && port! > 0 && port! <= 65535
       ? 'http://127.0.0.1:' + port : defaultOrigin;
+  }
+
+  private get durationMinutes(){return this.options.durationMinutes?.()??defaultDuration('nodejs');}
+
+  async progress():Promise<{done:number;total:number}|null> {
+    if(this.options.isolated&&!this.options.testPort)return null;
+    const summarize=(course:CourseNight)=>({done:course.completedModules,total:course.totalModules});
+    if(this.running&&this.course)return summarize(this.course);
+    if(!this.options.isolated){
+      const localData=process.env.LOCALAPPDATA||path.join(homedir(),'AppData','Local');
+      const file=path.join(process.env.BACKEND_PATH_DATA_DIR||path.join(localData,'Backend Path'),'progress-v1.json');
+      for(const suffix of ['', '.bak']){
+        try{
+          const saved=JSON.parse(await readFile(file+suffix,'utf8'));
+          if(saved.version===1&&Number.isInteger(saved.revision)&&saved.revision>0)return summarize(nightPlan(parseProgress(saved.progress)));
+        }catch{/* Try the saved backup or the local bridge. */}
+      }
+    }
+    try{return summarize(await this.readCourse(500));}catch{return null;}
   }
 
   get protected() { return this.guard.active; }
@@ -113,10 +136,10 @@ export class NodeNight {
     throw Error('Backend Path не відкрився. Перевір локальний сервер на порту 5174.');
   }
 
-  private async readCourse() {
-    const value = await this.request('night') as CourseNight | null;
+  private async readCourse(timeout?:number) {
+    const value = await this.request('night',timeout) as CourseNight | null;
     if (!value || !Array.isArray(value.completed) || !Number.isInteger(value.completedModules) ||
-        !Number.isInteger(value.totalModules) || value.candidate &&
+        !Number.isInteger(value.totalModules) || value.totalModules<1 || value.completedModules<0 || value.completedModules>value.totalModules || value.candidate &&
           (!/^[a-z0-9-]+$/.test(value.candidate.lessonId) ||
           !['lecture','practice','check'].includes(value.candidate.section) ||
           ![5,10,20].includes(value.candidate.minutes))) {
@@ -291,13 +314,13 @@ export class NodeNight {
     }
     if (this.loadTimer) clearTimeout(this.loadTimer);
     this.loadTimer = null;
-    const now = Date.now();
+    const now = Date.now(), budget = this.durationMinutes*minuteMs;
     const run: NightRun = {
-      id: randomUUID(), night: this.promptNight || 'demo', startedAt: now, deadline: now + NIGHT_LIMIT,
+      id: randomUUID(), night: this.promptNight || 'demo', startedAt: now, deadline: now + budget,
       steps: [this.course.candidate], passed: [],
     };
     this.running = run;
-    this.monotonicDeadline = performance.now() + NIGHT_LIMIT;
+    this.monotonicDeadline = performance.now() + budget;
     if (!this.preview && !this.options.isolated) {
       this.document.runs = [...this.document.runs.slice(-365), run];
       try { await this.save(); } catch {
@@ -306,7 +329,7 @@ export class NodeNight {
     }
     if (!this.browser || this.running !== run) throw Error('Сесію вже закрито.');
     this.phase = 'learning';
-    this.cutoff = setTimeout(() => this.applyDeadline(Date.now()), NIGHT_LIMIT);
+    this.cutoff = setTimeout(() => this.applyDeadline(Date.now()), budget);
     this.resume();
     this.publish();
     return this.view();
@@ -469,7 +492,7 @@ export class NodeNight {
   }
 
   private installHandlers() {
-    const state = () => ({ enabled: this.document.enabled, demo: this.preview || this.options.isolated, ...this.ai.settings() });
+    const state = () => ({ durationMinutes:this.durationMinutes, enabled: this.document.enabled, demo: this.preview || this.options.isolated, ...this.ai.settings() });
     ipcMain.handle('recall:node-control-state', event => {
       this.control(event, event.sender === this.settingsWindow?.webContents); return state();
     });
