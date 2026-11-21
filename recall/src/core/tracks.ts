@@ -16,6 +16,16 @@ export const LEARNING_TRACKS = [
     progressLabel: 'модулів завершено', defaultMinutes: 40, minMinutes: 5, maxMinutes: 120,
     durationHelp: 'Після цього Recall знімає повноекранний захист нічного заняття.',
   },
+  {
+    id:'git',title:'Git Tutor',activity:'Практика Git',defaultStart:null,
+    progressLabel:'вправ завершено',defaultMinutes:20,minMinutes:5,maxMinutes:120,
+    durationHelp:'Практика у навчальних репозиторіях Git Tutor.',
+  },
+  {
+    id:'vim',title:'Neovim Quest',activity:'Практика Vim',defaultStart:null,
+    progressLabel:'місій та іспитів завершено',defaultMinutes:20,minMinutes:5,maxMinutes:120,
+    durationHelp:'Місії та іспити у браузерному симуляторі Vim.',
+  },
 ] as const;
 
 export type TrackId = typeof LEARNING_TRACKS[number]['id'];

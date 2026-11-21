@@ -8,8 +8,8 @@ const app=await electron.launch({executablePath:env.RECALL_TEST_EXE||createRequi
 try{
   const page=await app.firstWindow();await page.getByText('Зробимо повторення звичкою?',{exact:true}).waitFor();
   const boot=await page.evaluate(()=>window.recall.bootstrap());assert.ok(boot.settings.statisticsPath.includes('sql-recall-smoke-'));assert.equal(boot.settings.setupComplete,false);
-  assert.deepEqual(Object.keys(boot.tracks),['postgresql','english','nodejs']);
-  assert.equal(await page.locator('#sidebar-tracks li').count(),3);
+  assert.deepEqual(Object.keys(boot.tracks),['postgresql','english','nodejs','git','vim']);
+  assert.equal(await page.locator('#sidebar-tracks li').count(),5);
   const preferences=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().map(w=>w.webContents.getLastWebPreferences()));
   assert.equal(preferences.length,1);assert.equal(preferences[0].nodeIntegration,false);assert.equal(preferences[0].contextIsolation,true);assert.equal(preferences[0].sandbox,true);
   assert.equal(await page.evaluate(()=>typeof window.require),'undefined');

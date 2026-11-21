@@ -6,10 +6,10 @@ import type {SessionRecord} from '../src/core/contracts';
 import {EnglishController,newEnglishDocument,validateEnglishDocument} from '../src/modules/english/controller';
 
 test('Learning tracks have independent defaults and validate whole-minute settings',()=>{
-  assert.deepEqual(LEARNING_TRACKS.map(({id})=>trackDuration(id)),[15,55,40]);
+  assert.deepEqual(LEARNING_TRACKS.map(({id})=>trackDuration(id)),[15,55,40,20,20]);
   const configured={postgresql:12,english:75,nodejs:25};
   assert.equal(validDurations(configured),true);
-  assert.deepEqual(LEARNING_TRACKS.map(({id})=>trackDuration(id,configured)),[12,75,25]);
+  assert.deepEqual(LEARNING_TRACKS.map(({id})=>trackDuration(id,configured)),[12,75,25,20,20]);
   assert.equal(trackDuration('postgresql',{english:75}),15);
   for(const invalid of [{postgresql:0},{nodejs:121},{english:'55'},{english:30.5},{unknown:40},[]]){
     assert.equal(validDurations(invalid),false);

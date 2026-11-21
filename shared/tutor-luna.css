@@ -1,0 +1,35 @@
+.tutor-luna { display: grid; gap: .8rem; min-width: 0; }
+.tutor-luna h2, .tutor-luna p { margin: 0; overflow-wrap: anywhere; }
+.tutor-luna h2 { font: inherit; font-weight: 650; }
+.tutor-luna-log {
+  display: grid;
+  gap: .7rem;
+  max-height: min(36vh, 20rem);
+  overflow: auto;
+}
+.tutor-luna-log [role], .tutor-luna-log p, .tutor-luna-side p { white-space: pre-wrap; }
+.tutor-luna-log strong, .tutor-luna-side strong { font-size: .8em; }
+.tutor-luna-log > div, .tutor-luna-side {
+  border-radius: .35rem;
+  padding: .6rem .75rem;
+  background: rgb(128 128 128 / .12);
+}
+.tutor-luna-side { border-inline-start: 2px solid currentColor; max-height: 9rem; overflow: auto; }
+.tutor-luna [hidden] { display: none; }
+.tutor-luna form { display: grid; gap: .65rem; }
+.tutor-luna label { font-size: .86em; }
+.tutor-luna textarea, .tutor-luna select {
+  background: transparent;
+  color: inherit;
+  border: 1px solid currentColor;
+  border-radius: .35rem;
+  font: inherit;
+  padding: .4rem;
+}
+.tutor-luna select { color-scheme: dark; }
+.tutor-luna textarea { width: 100%; box-sizing: border-box; resize: vertical; display: block; margin-top: .3rem; }
+.tutor-luna-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+.tutor-luna-actions label { display: inline-flex; align-items: center; gap: .3rem; }
+.tutor-luna-actions [data-chat="minimal"][aria-pressed="false"] { opacity: .65; }
+.tutor-luna-actions button { font-size: .8em; }
+.tutor-luna-status { font-size: .85em; }

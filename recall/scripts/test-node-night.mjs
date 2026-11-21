@@ -67,7 +67,7 @@ try {
   const tracks=await dashboard.evaluate(()=>window.recall.trackProgress());
   assert.equal(tracks.english.total,84);
   assert.equal(tracks.nodejs.done,0);assert.ok(tracks.nodejs.total>0);
-  assert.equal(await dashboard.locator('#sidebar-tracks li').count(),3);
+  assert.equal(await dashboard.locator('#sidebar-tracks li').count(),5);
   await dashboard.locator('#nav-settings').click();
   for(const [id,minutes] of Object.entries({postgresql:'15',english:'55',nodejs:'40'})){
     assert.equal(await dashboard.locator('#duration-'+id).inputValue(),minutes);
@@ -81,8 +81,8 @@ try {
   await dashboard.getByRole('button',{name:'Зберегти розклад'}).click();
   await dashboard.getByText('Розклад і тривалість збережено.').waitFor();
   const configured=await dashboard.evaluate(()=>window.recall.bootstrap());
-  assert.deepEqual(configured.settings.durationMinutes,{postgresql:15,english:55,nodejs:30});
-  assert.deepEqual(configured.startTimes,{postgresql:'08:17',english:null,nodejs:'01:13'});
+  assert.deepEqual(configured.settings.durationMinutes,{postgresql:15,english:55,nodejs:30,git:20,vim:20});
+  assert.deepEqual(configured.startTimes,{postgresql:'08:17',english:null,nodejs:'01:13',git:null,vim:null});
   assert.deepEqual(JSON.parse(await readFile(path.join(configured.settings.statisticsPath,'settings.json'),'utf8')).startTimes,configured.startTimes);
   await app.evaluate(({BrowserWindow,screen})=>{
     BrowserWindow.prototype.setKiosk=function(){};
@@ -121,6 +121,19 @@ try {
   const lunaReply=study.locator('.node-chat-assistant');
   await lunaReply.waitFor();
   assert.match(await lunaReply.textContent(),/Демо Luna/);
+  const prefs=study.locator('.node-luna-controls');
+  await prefs.locator('select').selectOption('20');
+  const concise=prefs.getByRole('button',{name:'Стисло'});
+  await concise.click();
+  assert.equal(await concise.getAttribute('aria-pressed'),'false');
+  await study.locator('#node-chat-question').fill('/btw What is the event loop?');
+  await study.locator('.node-chat-actions button[type=submit]').click();
+  await study.locator('.node-chat-btw-a').filter({hasText:'Демо Luna'}).waitFor();
+  assert.equal(await lunaReply.count(),1);
+  await prefs.getByRole('button',{name:'Очистити чат'}).click();
+  await lunaReply.waitFor({state:'hidden'});
+  await study.locator('.node-chat-btw-card').waitFor({state:'hidden'});
+  console.log('PASS Node.js Luna side reply, clear, adjustable context and concise toggle.');
   await lunaLauncher.click();
   await study.getByRole('button',{name:'Переходжу до практики'}).click();
   await study.getByRole('button',{name:/Ще один крок/}).click();

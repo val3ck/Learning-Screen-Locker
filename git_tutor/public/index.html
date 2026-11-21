@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Git Tutor</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/luna-chat.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div class="frame">
+    <header class="masthead">
+      <a href="/" class="brand" id="brand"><span aria-hidden="true">›_</span> Git Tutor</a>
+      <div class="mast-actions">
+        <span id="progress" class="quiet"></span>
+        <button type="button" id="menu" class="menu-button">Довідник і курс <kbd>F2</kbd></button>
+      </div>
+    </header>
+    <main>
+      <p id="notice" class="notice" role="status" hidden></p>
+      <section class="mission" aria-labelledby="mission-title">
+        <div class="brief">
+          <p id="chapter" class="chapter"></p>
+          <h1 id="mission-title">Готуємо вправу…</h1>
+          <p id="description"></p>
+        </div>
+        <div class="goals">
+          <h2>Що має вийти</h2>
+          <ul id="checks"></ul>
+        </div>
+      </section>
+      <div class="workspace">
+        <section class="shell panel" aria-labelledby="shell-title">
+          <div class="panel-head"><h2 id="shell-title"><span class="dot"></span> Термінал</h2><span id="operation" class="quiet"></span></div>
+          <div id="terminal" class="terminal" tabindex="0" role="log" aria-label="Вивід Git"></div>
+          <form id="command-form" class="prompt">
+            <label for="command" id="prompt-label" title="Git-команда">❯</label>
+            <input id="command" type="text" aria-label="Git-команда" placeholder="git status -sb" maxlength="1200" autocomplete="off" autocapitalize="none" spellcheck="false" disabled>
+            <button type="submit" id="run" aria-label="Виконати команду" title="Виконати команду" disabled>↵</button>
+          </form>
+        </section>
+        <section class="editor-panel panel" aria-labelledby="editor-title">
+          <div class="panel-head"><h2 id="editor-title">Файли вправи</h2><button type="button" id="save" disabled>Зберегти <kbd>Ctrl+S</kbd></button></div>
+          <div id="tabs" class="files" aria-label="Файли вправи"></div>
+          <div class="editor-body">
+            <textarea id="editor" aria-label="Вміст файла" spellcheck="false" wrap="off" maxlength="24000" hidden></textarea>
+            <p id="empty-files" class="quiet">Файли з’являться після клонування.</p>
+          </div>
+          <div class="editor-foot quiet" id="file-status"></div>
+        </section>
+      </div>
+      <div class="statusline" id="repo-status" aria-label="Стан репозиторію"></div>
+      <section class="action-row" aria-label="Дії вправи">
+        <div class="action-group">
+          <button type="button" id="hint" disabled>Підказка</button>
+          <button type="button" id="colleague" hidden>Колега запушив</button>
+          <button type="button" id="reset" class="subtle" disabled>Скинути вправу</button>
+        </div>
+        <div class="action-group">
+          <button type="button" id="check" disabled>Перевірити</button>
+          <button type="button" id="next" class="primary" hidden>Далі →</button>
+        </div>
+      </section>
+      <ol id="hints" class="hints" aria-label="Підказки" hidden></ol>
+    </main>
+  </div>
+  <dialog id="drawer" class="drawer" aria-labelledby="drawer-title">
+    <div class="dialog-head">
+      <h2 id="drawer-title">Довідник і курс</h2>
+      <button type="button" data-close-drawer aria-label="Закрити">×</button>
+    </div>
+    <div class="drawer-tabs" aria-label="Розділ меню">
+      <button type="button" data-drawer-tab="course" aria-pressed="true">Курс</button>
+      <button type="button" data-drawer-tab="manual" aria-pressed="false">Довідник</button>
+      <button type="button" data-drawer-tab="luna" aria-pressed="false" hidden>Luna</button>
+    </div>
+    <div class="drawer-content" id="drawer-content"></div>
+  </dialog>
+  <dialog id="reset-dialog" class="confirm" aria-labelledby="confirm-title">
+    <h2 id="confirm-title">Почати вправу заново?</h2>
+    <p>У цій вправі відкриється новий навчальний репозиторій. Позначка про проходження збережеться.</p>
+    <form method="dialog" class="action-group">
+      <button value="cancel" autofocus>Назад</button>
+      <button value="reset" class="primary">Скинути вправу</button>
+    </form>
+  </dialog>
+</body>
+</html>

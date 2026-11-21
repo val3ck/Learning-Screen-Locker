@@ -16,6 +16,9 @@
 **/scratch/
 **/node_modules/
 **/dist/
+!/neovim_tutor/neovim-quest/dist/
+!/neovim_tutor/neovim-quest/dist/**
+/git_tutor/data/
 **/dist-main/
 **/dist-server/
 **/release*/

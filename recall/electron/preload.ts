@@ -1,7 +1,7 @@
 import {contextBridge,ipcRenderer} from 'electron';
 import type {DesktopAPI} from '../src/core/contracts';
 const api:DesktopAPI={
-  bootstrap:()=>ipcRenderer.invoke('recall:bootstrap'),trackProgress:()=>ipcRenderer.invoke('recall:track-progress'),configureTracks:settings=>ipcRenderer.invoke('recall:configure-tracks',settings),nodePractice:()=>ipcRenderer.invoke('recall:node-practice'),configure:settings=>ipcRenderer.invoke('recall:configure',settings),
+  bootstrap:()=>ipcRenderer.invoke('recall:bootstrap'),trackProgress:()=>ipcRenderer.invoke('recall:track-progress'),configureLunaModels:models=>ipcRenderer.invoke('recall:configure-luna-models',models),configureTracks:settings=>ipcRenderer.invoke('recall:configure-tracks',settings),nodePractice:()=>ipcRenderer.invoke('recall:node-practice'),browserPractice:id=>ipcRenderer.invoke('recall:browser-practice',id),configure:settings=>ipcRenderer.invoke('recall:configure',settings),
   openCourse:()=>ipcRenderer.invoke('recall:course'),importProgress:()=>ipcRenderer.invoke('recall:import'),
   openStatistics:()=>ipcRenderer.invoke('recall:statistics'),start:mode=>ipcRenderer.invoke('recall:start',mode),
   saveSession:session=>ipcRenderer.invoke('recall:save-session',session),finishSession:session=>ipcRenderer.invoke('recall:finish-session',session),

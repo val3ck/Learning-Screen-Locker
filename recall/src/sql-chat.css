@@ -104,3 +104,33 @@ body:has(.surrender-bar button:not([hidden])) .sql-chat-widget { --chat-offset: 
 .sql-chat-answer pre code { padding: 0; background: transparent; color: inherit; }
 @keyframes luna-panel-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .sql-chat { animation: none !important; } }
+
+.luna-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem .65rem;
+  font-size: .77rem;
+}
+.luna-controls label { display: inline-flex; align-items: center; gap: .35rem; }
+.luna-controls select, .luna-controls button {
+  color: inherit;
+  font: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: .4rem;
+  min-height: 1.8rem;
+  padding: .2rem .38rem;
+}
+.luna-controls button[aria-pressed="false"] { opacity: .7; border-color: transparent; }
+.luna-btw {
+  border-inline-start: 2px solid currentColor;
+  border-radius: .35rem;
+  background: rgb(128 128 128 / .14);
+  padding: .55rem .75rem;
+  overflow-wrap: anywhere;
+  max-height: 11rem;
+  overflow: auto;
+}
+.luna-btw[hidden] { display: none; }
+.luna-btw div { white-space: pre-wrap; }

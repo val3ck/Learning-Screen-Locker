@@ -1,3 +1,4 @@
+import {LUNA_MAX,LUNA_MIN,lunaPreferences,lunaQuestion,type LunaOptions,type LunaPreferences} from '../../shared/luna-chat';
 import { useEffect, useRef, useState } from 'react';
 import type { Step } from './lib/progress';
 import {chatMarkup} from './chat-markup';
@@ -33,9 +34,8 @@ const emptyConversation = (): ConversationState => ({
 });
 
 function detectBtwPrefix(text: string): { hasPrefix: boolean; cleanText: string } {
-  const match = /^\/(?:btw|бтв)(?:\s+|$)(.*)$/i.exec(text.trim());
-  if (!match) return { hasPrefix: false, cleanText: text };
-  return { hasPrefix: true, cleanText: match[1] };
+  const parsed=lunaQuestion(text,'');
+  return {hasPrefix:parsed.btw,cleanText:parsed.question};
 }
 
 export function LunaChat({
@@ -63,6 +63,14 @@ export function LunaChat({
   const [pendingQuestion, setPendingQuestion] = useState('');
   const [pendingBtw, setPendingBtw] = useState(false);
   const [error, setError] = useState('');
+  const [prefs,setPrefs]=useState(()=>{
+    try{return lunaPreferences(JSON.parse(localStorage.getItem('recall.luna.nodejs')||'null'));}catch{return lunaPreferences(undefined);}
+  });
+  function savePreferences(value:LunaPreferences){
+    const next=lunaPreferences(value);
+    setPrefs(next);
+    try{localStorage.setItem('recall.luna.nodejs',JSON.stringify(next));}catch{}
+  }
 
   const logRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -121,10 +129,13 @@ export function LunaChat({
       let provider = 'openai';
       let model = 'Luna';
 
-      const payloadQuestion = btw && !/^\/(?:btw|бтв)\b/i.test(raw)
+      const payloadQuestion = btw && !/^\/(?:btw|бтв)(?=\s|$)/iu.test(raw)
         ? `/бтв ${effectiveQuestion}`
         : raw || `/бтв ${effectiveQuestion}`;
 
+      const luna:LunaOptions={...prefs,history:btw?[]:current.messages.slice(1-prefs.limit).map(message=>
+        message.role==='user'?{role:'user',text:message.question.slice(0,450)}:{role:'assistant',text:message.answer.slice(0,450)}
+      )};
       if (window.recallNode) {
         const res = await window.recallNode.ask({
           lesson: scope,
@@ -132,6 +143,7 @@ export function LunaChat({
           question: payloadQuestion,
           code: current.code,
           btw,
+          luna,
         });
         if (typeof res === 'string') {
           answer = res;
@@ -153,6 +165,7 @@ export function LunaChat({
             question: payloadQuestion,
             code: current.code,
             btw,
+            luna,
           }),
         });
         const data = (await response.json().catch(() => ({}))) as {
@@ -181,7 +194,7 @@ export function LunaChat({
           ...current.messages,
           { role: 'user' as const, question: effectiveQuestion },
           { role: 'assistant' as const, answer, provider, model },
-        ].slice(-NODE_CHAT_LIMIT);
+        ].slice(-LUNA_MAX);
         updateCurrent({
           draft: '',
           messages: nextMessages,
@@ -200,8 +213,8 @@ export function LunaChat({
 
   const displayedMessages: NodeChatEntry[] =
     pendingQuestion && !pendingBtw
-      ? [...current.messages, { role: 'user' as const, question: pendingQuestion }].slice(-NODE_CHAT_LIMIT)
-      : current.messages;
+      ? [...current.messages, { role: 'user' as const, question: pendingQuestion }].slice(-prefs.limit)
+      : current.messages.slice(-prefs.limit);
 
   const sectionLabel =
     section === 'practice' ? 'Практика' : section === 'check' ? 'Перевірка' : 'Лекція';
@@ -232,8 +245,8 @@ export function LunaChat({
       >
         <span>Luna</span>
         {current.messages.length > 0 && (
-          <small className="node-chat-count" aria-label={`Історія: ${current.messages.length} з ${NODE_CHAT_LIMIT}`}>
-            {current.messages.length}/{NODE_CHAT_LIMIT}
+          <small className="node-chat-count" aria-label={`Історія: ${Math.min(current.messages.length,prefs.limit)} з ${prefs.limit}`}>
+            {Math.min(current.messages.length,prefs.limit)}/{prefs.limit}
           </small>
         )}
       </button>
@@ -269,8 +282,15 @@ export function LunaChat({
           </header>
 
           <div className="node-chat-content">
+            <div className="node-chat-quick-chips node-luna-controls">
+              <label>Контекст <select value={prefs.limit} onChange={event=>savePreferences({...prefs,limit:Number(event.target.value)})}>
+                {Array.from({length:LUNA_MAX-LUNA_MIN+1},(_,index)=>LUNA_MIN+index).map(limit=><option key={limit}>{limit}</option>)}
+              </select></label>
+              <button type="button" className="node-chat-chip" disabled={!!pendingQuestion} onClick={()=>{updateCurrent(emptyConversation());setError('');}}>Очистити чат</button>
+              <button type="button" className="node-chat-chip" aria-pressed={prefs.minimal} onClick={()=>savePreferences({...prefs,minimal:!prefs.minimal})}>Стисло</button>
+            </div>
             <p className="node-chat-note">
-              Історія тримає останні <b>{NODE_CHAT_LIMIT} повідомлень</b> цього уроку. Натисни{' '}
+              Історія тримає останні <b>{prefs.limit} повідомлень</b> цього уроку. Натисни{' '}
               <button type="button" className="node-chat-inline-btw" onClick={handleToggleBtw}>
                 /бтв
               </button>{' '}
@@ -300,7 +320,7 @@ export function LunaChat({
             {(current.btwCard || (pendingQuestion && pendingBtw)) && (
               <aside className="node-chat-btw-card" aria-label="Відповідь /бтв поза основною історією">
                 <div className="node-chat-btw-top">
-                  <span className="node-chat-btw-badge">/бтв · До речі (поза історією 5 соо)</span>
+                  <span className="node-chat-btw-badge">/btw · До речі</span>
                   {current.btwCard && !pendingQuestion && (
                     <button
                       type="button"

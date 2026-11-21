@@ -1,3 +1,4 @@
+import type {LunaOptions} from '../../shared/luna-chat';
 import { useEffect, useState } from 'react';
 import type { Step } from './lib/progress';
 
@@ -26,7 +27,7 @@ export interface NightView {
   criteriaDone: number;
   lessonsDone: number;
 }
-type Ask = { lesson: string; section: Step; question: string; code: string; btw?: boolean };
+type Ask = { lesson: string; section: Step; question: string; code: string; btw?: boolean; luna?:LunaOptions };
 declare global {
   interface Window {
     recallNode?: {

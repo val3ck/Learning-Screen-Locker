@@ -1,3 +1,4 @@
+import {forLunaModel,lunaOptions,lunaQuestion,type LunaModel} from '../../shared/luna-chat';
 import {SQL_CHAT_LIMIT, SQL_CHAT_QUESTION_LIMIT, type SessionRecord, type SQLChatReply} from '../src/core/contracts';
 
 type Message = {role:'user'|'assistant';text:string};
@@ -23,11 +24,11 @@ export class SQLChat {
   private messages:Message[]=[];
   private pending=false;
 
-  constructor(private client:ChatClient,private config:()=>Config,private useFallback:()=>boolean,private demo=false) {}
+  constructor(private client:ChatClient,private config:()=>Config,private useFallback:()=>boolean,private demo=false,private modelChoice:()=>LunaModel|undefined=()=>undefined) {}
 
   async ask(session:SessionRecord|null,input:unknown):Promise<SQLChatReply> {
     if(!input || typeof input!=='object') throw Error('Введи запитання про SQL-вправу.');
-    const {sessionId,taskId,question,feedback}=input as Record<string,unknown>;
+    const {sessionId,taskId,question,feedback,luna}=input as Record<string,unknown>;
     if(typeof question!=='string'||!question.trim()||question.length>SQL_CHAT_QUESTION_LIMIT||
       (feedback!==undefined&&(typeof feedback!=='string'||feedback.length>1200))) throw Error('Введи коротке запитання про SQL-вправу.');
     const index=session?.currentIndex??-1, task=session?.tasks[index];
@@ -40,13 +41,18 @@ export class SQLChat {
     const config:Config=this.demo?{keys:{},models:{}}:this.config();
     const keys=Object.values(config.keys);
     const fallback=this.useFallback();
-    const routes=(fallback?providers:providers.slice(0,1)).filter(id=>!!config.keys[id]);
+    const opts=lunaOptions(luna);
+    const {btw,question:ask}=lunaQuestion(question,'Дай одну практичну пораду з цієї SQL-теми.');
+    const choice=this.modelChoice();
+    const routes=(choice?[choice.provider]:fallback?providers:providers.slice(0,1)).filter(id=>!!config.keys[id]);
     if(!this.demo&&!routes.length) throw Error('Підключи OpenAI-ключ у Recall → Налаштування → SQL, або ввімкни налаштований резерв.');
     const clean=(text:string,limit:number)=>safeText(text,limit,keys);
-    const history:Message[]=[...this.messages.slice(-(SQL_CHAT_LIMIT-1)),{role:'user',text:clean(question,SQL_CHAT_QUESTION_LIMIT)}];
+    const recent=btw?[]:luna?opts.history:this.messages.slice(1-SQL_CHAT_LIMIT);
+    const history:Message[]=[...recent.map(turn=>({...turn,text:clean(turn.text,450)})),{role:'user',text:clean(ask,SQL_CHAT_QUESTION_LIMIT)}];
     const sql=session.answers[index];
     const last=session.attempts.filter(attempt=>attempt.taskId===task.id).at(-1);
-    const prompt:Prompt={system,maxOutputTokens:450,user:JSON.stringify({
+    const guidance=btw?' Side question. Answer directly in two to four sentences.':opts.minimal?'':' When helpful, explain the reasoning in a little more detail.';
+    const prompt:Prompt={system:system.replace(' in 2–4 sentences',opts.minimal?' in 2–4 sentences':'')+guidance,maxOutputTokens:opts.minimal||btw?450:900,user:JSON.stringify({
       exercise:{title:clean(task.title,300),brief:clean(task.brief,2500),solved:session.solved[index]},
       schema:task.tables.slice(0,10).map(table=>({name:clean(table.name,100),columns:table.columns.slice(0,25).map(column=>({
         name:clean(column.name,100),type:clean(column.type,100),
@@ -65,9 +71,8 @@ export class SQLChat {
           const answer=typeof value?.answer==='string'?clean(value.answer,4500):'';
           if(!answer) throw Error('Порожня відповідь.');
           return {answer,provider,model:options.models[provider]};
-        },routes,'sql-chat',{...config,automaticFallback:fallback,models:{...config.models,openai:model}});
-      history.push({role:'assistant',text:reply.answer});
-      this.messages=history.slice(-SQL_CHAT_LIMIT);
+        },routes,'sql-chat',forLunaModel({...config,automaticFallback:fallback,models:{...config.models,openai:model}},choice));
+      if(!btw&&!luna)this.messages=[...history,{role:'assistant' as const,text:reply.answer}].slice(-SQL_CHAT_LIMIT);
       return {answer:reply.answer,provider:reply.provider,model:reply.model};
     } catch {
       throw Error('Luna зараз недоступна. Спробуй запитати ще раз пізніше.');

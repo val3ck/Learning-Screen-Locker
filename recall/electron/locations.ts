@@ -44,3 +44,11 @@ export async function configureCourseStorage(module:LearningModule,coursePath:st
   let old:string|undefined;try{old=await readFile(target,'utf8');}catch{}
   if(old!==content){if(old!==undefined)try{await access(target+'.before-1.4');}catch{await copyFile(target,target+'.before-1.4');}await writeFile(target,content,'utf8');}
 }
+
+export async function resolveBrowserTutorPath(projectRoot:string,packaged:boolean,id:'git'|'vim'){
+  const suiteRoot=path.resolve(installationRoot(projectRoot,packaged),'..');
+  const relative=id==='git'?'git_tutor':path.join('neovim_tutor','neovim-quest');
+  const candidates=[path.join(suiteRoot,relative),path.resolve(suiteRoot,'../PGM',relative)];
+  for(const folder of candidates)try{await access(path.join(folder,'server.mjs'));return folder;}catch{}
+  return null;
+}

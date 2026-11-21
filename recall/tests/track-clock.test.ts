@@ -12,6 +12,8 @@ test('Track schedules accept any Kyiv minute and explicitly support manual mode'
   assert.equal(defaultStart('postgresql'),'activity');
   assert.equal(defaultStart('english'),'19:00');
   assert.equal(defaultStart('nodejs'),'22:59');
+  assert.equal(defaultStart('git'),null);assert.equal(defaultStart('vim'),null);
+  assert.equal(validStarts({git:'08:17',vim:null}),true);
   assert.equal(validStarts({postgresql:'00:07',english:'23:59',nodejs:null}),true);
   assert.equal(validStarts({postgresql:'activity'}),true);
   for(const value of [{nodejs:'activity'},{english:'24:00'},{postgresql:'3:45'},{english:false},{nodejs:'15:62'},{other:'10:00'}]){

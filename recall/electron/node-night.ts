@@ -1,3 +1,4 @@
+import type {LunaModel} from '../../shared/luna-chat';
 import { app, BrowserWindow, ipcMain, screen, shell, type IpcMainInvokeEvent } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -64,9 +65,9 @@ export class NodeNight {
     canOffer?: () => boolean;
     scheduledTime?: () => ClockTime|null|undefined;
     shutdown?: () => Promise<void>;
-    exerciseGuard?: boolean; testPort?: number; separateApiKey?: string; durationMinutes?: () => number;
+    exerciseGuard?: boolean; testPort?: number; separateApiKey?: string; lunaModel?:()=>LunaModel|undefined; durationMinutes?: () => number;
   }) {
-    this.ai = new NodeNightAI(options.store, options.englishAI, options.isolated, options.separateApiKey);
+    this.ai = new NodeNightAI(options.store, options.englishAI, options.isolated, options.separateApiKey, options.lunaModel);
     const port = options.testPort;
     this.origin = options.isolated && Number.isInteger(port) && port! > 0 && port! <= 65535
       ? 'http://127.0.0.1:' + port : defaultOrigin;
@@ -578,7 +579,7 @@ export class NodeNight {
       const context = await this.request('context?lesson=' + encodeURIComponent(lesson) + '&section=' + input.section);
       const plan = this.running.steps.map(step => step.lesson + ': ' + step.title).join(' → ');
       if (this.preview) return 'Демо Luna. Скористайся підказками до поточного завдання та перевір один приклад.';
-      return this.ai.ask(input.question, input.code, context, plan, lesson, input.btw === true);
+      return this.ai.ask(input.question, input.code, context, plan, lesson, input.btw === true, input.luna);
     });
     app.on('before-quit', () => this.closeInvitation());
   }

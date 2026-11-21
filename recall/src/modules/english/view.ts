@@ -1,7 +1,7 @@
+import type {LunaOptions} from '../../../../shared/luna-chat';
 import {installContextTranslator,renderTranslatorTools} from './translator-view';
 import {enhanceEnglishAnswers} from './answer-enhancements';
 import {EnglishLunaChat} from './luna-chat';
-import type {LunaMessage} from './dialogue';
 import type {EnglishView,EnglishChoice,EnglishSpeechRequest,EnglishLanguageReport} from './types';
 import {waitForEnglishVoice} from './speech-voices';
 import {renderAISettings,getListeningRate,providerSwitchMessage} from './ai-view';
@@ -44,14 +44,14 @@ export class EnglishScreen {
   }
   private async flush(){if(this.timer)clearTimeout(this.timer);this.timer=null;const entries=[...this.pending];this.pending.clear();for(const [key,value]of entries){const next=await window.recall.englishAction({type:'answer',key,value});this.state=next;this.onUpdate(next);} }
   private run(work:()=>Promise<void>){this.queue=this.queue.then(work).catch(error=>this.message(String(error).replace(/^Error: /,'')));return this.queue;}
-  private askLuna(area:string,key:string,question:string,context:LunaMessage[]):Promise<string>{
+  private askLuna(area:string,key:string,question:string,luna:LunaOptions):Promise<string>{
     const work=this.queue.then(async()=>{
       await this.flush();
       const activeArea=this.state.run?.payload.phase==='reinforcement'?'practice':this.state.lesson.blocks[this.state.attempt?.blockIndex??-1]?.id;
       if(area!==activeArea||this.state.run?.status!=='active')throw Error('Open that task again to ask Luna.');
       await this.stopRecording();this.stopSpeech();this.heartbeat('waiting');
       try{
-        const result=await window.recall.englishAI({action:'hint',area,targetKey:key,question,context});
+        const result=await window.recall.englishAI({action:'hint',area,targetKey:key,question,luna});
         this.state=result.view;this.onUpdate(this.state);await this.flush();
         return [result.hint.clarification,result.hint.hint,result.hint.nextStep].filter(Boolean).join('\n\n');
       }finally{this.stopHeartbeat();}

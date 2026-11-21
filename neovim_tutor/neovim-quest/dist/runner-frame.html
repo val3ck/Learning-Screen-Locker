@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; worker-src blob:; connect-src 'none'; form-action 'none'">
+<script>
+// An opaque-origin frame owns a disposable worker. Code cannot touch the game,
+// browser storage, or network; an endless loop is terminated off the UI thread.
+window.onmessage=event=>{
+  if(event.source!==parent||!event.data?.id)return;
+  const {id,code,tests}=event.data;
+  const workerSource=`
+    const send=self.postMessage.bind(self);
+    self.onmessage=async(event)=>{
+      const {code,tests}=event.data,logs=[];
+      console.log=(...args)=>{if(logs.join('').length<2400)logs.push(args.map(String).join(' '));};
+      try{
+        const solve=new Function('"use strict";\\n'+code+'\\n;return typeof solve === "function" ? solve : null;')();
+        if(!solve)throw new Error('Define a function named solve(n).');
+        const results=[];
+        for(const test of tests){let actual,error;try{actual=await solve(test.input);}catch(e){error=String(e.message||e);}
+          results.push({...test,actual:typeof actual==='number'?actual:String(actual),passed:!error&&actual===test.expected,error});}
+        send({results,output:logs.join('\\n')});
+      }catch(error){send({error:String(error.message||error)});}
+    };`;
+  const url=URL.createObjectURL(new Blob([workerSource],{type:'text/javascript'}));let worker;
+  try{worker=new Worker(url);}catch(e){parent.postMessage({id,error:String(e.message||e)},'*');URL.revokeObjectURL(url);return;}
+  const end=result=>{clearTimeout(timeout);worker.terminate();URL.revokeObjectURL(url);parent.postMessage({id,...result},'*');};
+  const timeout=setTimeout(()=>end({error:'JavaScript execution timed out. Check for an endless loop.'}),1800);
+  worker.onmessage=e=>end(e.data);worker.onerror=e=>end({error:e.message||'JavaScript worker error.'});worker.postMessage({code,tests});
+};
+</script>

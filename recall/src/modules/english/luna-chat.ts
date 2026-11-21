@@ -1,5 +1,7 @@
+import {LUNA_MAX,lunaQuestion,type LunaOptions} from '../../../../shared/luna-chat';
+import {localLunaPreferences,lunaControls,showLunaBtw} from '../../luna-controls';
 import {chatMarkup} from '../../chat-markup';
-import {LUNA_CONTEXT_LIMIT, LUNA_INPUT_LIMIT, type LunaMessage} from './dialogue';
+import {LUNA_INPUT_LIMIT, type LunaMessage} from './dialogue';
 import type {EnglishView} from './types';
 import '../../sql-chat.css';
 
@@ -11,10 +13,12 @@ export class EnglishLunaChat {
   private area = '';
   private autoKey = '';
   private pending = false;
+  private prefs=localLunaPreferences('english');
+  private side=new Map<string,{question:string;answer:string}>();
   private disposed = false;
   private conversations = new Map<string, LunaMessage[]>();
 
-  constructor(private root:HTMLElement, private ask:(area:string,key:string,question:string,context:LunaMessage[])=>Promise<string>) {
+  constructor(private root:HTMLElement, private ask:(area:string,key:string,question:string,options:LunaOptions)=>Promise<string>) {
     this.widget=document.createElement('div');
     this.widget.className='sql-chat-widget en-luna-widget';
     this.widget.hidden=true;
@@ -25,6 +29,7 @@ export class EnglishLunaChat {
           <label for="en-luna-target">Which task?</label><select id="en-luna-target"></select>
           <p class="sql-chat-note en-luna-context"></p>
           <div class="sql-chat-messages" role="log" aria-label="Luna task help" hidden></div>
+          <div class="luna-btw" role="status" hidden></div>
           <form><label for="en-luna-question">Your question</label><textarea id="en-luna-question" rows="2" maxlength="${LUNA_INPUT_LIMIT}" placeholder="What should I clarify in my answer?"></textarea>
             <div class="sql-chat-actions"><p class="sql-chat-status" role="status"></p><button type="submit" class="button primary">Ask Luna</button></div></form>
         </div>
@@ -44,7 +49,15 @@ export class EnglishLunaChat {
       if(event.key==='Escape'&&!panel.hidden){event.preventDefault();event.stopPropagation();toggle(false);}
     });
     this.select.addEventListener('change',()=>{this.input.value='';this.status('');this.update();});
-    this.widget.querySelector('form')!.addEventListener('submit',event=>{event.preventDefault();void this.send();});
+    const form=this.widget.querySelector('form')!;
+    form.before(lunaControls(this.prefs,value=>{this.prefs=localLunaPreferences('english',value);this.update();},()=>{
+      if(this.pending)return;
+      this.conversations.delete(this.thread());this.side.delete(this.thread());this.input.value='';this.status('');this.update();
+    },()=>{
+      if(this.pending)return;
+      this.input.value='/btw '+this.input.value.replace(/^\/(?:btw|бтв)\s*/iu,'');this.input.focus();
+    },true));
+    form.addEventListener('submit',event=>{event.preventDefault();void this.send();});
     this.root.addEventListener('focusin',this.trackFocus);
     document.body.append(this.widget);
   }
@@ -87,7 +100,9 @@ export class EnglishLunaChat {
   private status(text:string){this.widget.querySelector('.sql-chat-status')!.textContent=text;}
   private update(){
     const log=this.widget.querySelector<HTMLElement>('.sql-chat-messages')!;
-    const messages=this.conversations.get(this.thread())||[];
+    const messages=(this.conversations.get(this.thread())||[]).slice(-this.prefs.limit);
+    this.widget.querySelector<HTMLButtonElement>('[data-luna-clear]')!.disabled=this.pending;
+    showLunaBtw(this.widget.querySelector('.luna-btw')!,this.side.get(this.thread()));
     log.replaceChildren(...messages.map(message=>{
       const row=document.createElement('div'),label=document.createElement('strong'),content=document.createElement('div');
       if(message.role==='user')row.className='sql-chat-user';
@@ -108,13 +123,19 @@ export class EnglishLunaChat {
     if(!text||this.pending)return;
     const key=this.key(),thread=this.thread();
     const history=this.conversations.get(thread)||[];
+    const parsed=lunaQuestion(text,'Share one useful English tip related to this exercise.');
     this.pending=true;
     this.status('Luna is thinking…');
     this.update();
     try {
-      const response=await this.ask(this.area,key,text,history.slice(1-LUNA_CONTEXT_LIMIT));
+      const response=await this.ask(this.area,key,text,{...this.prefs,history:parsed.btw?[]:history.slice(1-this.prefs.limit)});
       if(this.disposed)return;
-      this.conversations.set(thread,[...history,{role:'user',text},{role:'assistant',text:response.trim().slice(0,LUNA_INPUT_LIMIT)||'Try asking about a specific part of the task.'}].slice(-LUNA_CONTEXT_LIMIT) as LunaMessage[]);
+      if(parsed.btw){
+        this.side.set(thread,{question:parsed.question,answer:response});
+        if(this.side.size>40)this.side.delete(this.side.keys().next().value!);
+      }else{
+        this.conversations.set(thread,[...history,{role:'user',text},{role:'assistant',text:response.trim().slice(0,LUNA_INPUT_LIMIT)||'Try asking about a specific part of the task.'}].slice(-LUNA_MAX) as LunaMessage[]);
+      }
       if(this.conversations.size>40)this.conversations.delete(this.conversations.keys().next().value!);
       if(thread===this.thread()&&this.input.value.trim()===text)this.input.value='';
       this.status('');
