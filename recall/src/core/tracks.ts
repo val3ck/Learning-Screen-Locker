@@ -1,22 +1,26 @@
+import {isClockTime,type ClockTime} from './calendar';
+
 export const LEARNING_TRACKS = [
   {
-    id: 'postgresql', title: 'PostgreSQL', activity: 'Повторення SQL',
+    id: 'postgresql', title: 'PostgreSQL', activity: 'Повторення SQL', defaultStart: 'activity',
     progressLabel: 'тем для практики', defaultMinutes: 15, minMinutes: 5, maxMinutes: 60,
     durationHelp: 'Після цього можна зберегти й вийти. Якщо всі вправи готові, можна завершити раніше.',
   },
   {
-    id: 'english', title: 'English', activity: 'Вивчення англійської',
+    id: 'english', title: 'English', activity: 'Вивчення англійської', defaultStart: '19:00',
     progressLabel: 'уроків завершено', defaultMinutes: 55, minMinutes: 15, maxMinutes: 120,
-    durationHelp: 'Після цього часу можна доробити поточний блок або зберегти його.',
+    durationHelp: 'Після цього часу можна доробити або зберегти поточний блок. З 23:00 до 04:59 сесія починається за твоїм підтвердженням.',
   },
   {
-    id: 'nodejs', title: 'Node.js', activity: 'Вивчення Node.js',
+    id: 'nodejs', title: 'Node.js', activity: 'Вивчення Node.js', defaultStart: '22:59',
     progressLabel: 'модулів завершено', defaultMinutes: 40, minMinutes: 5, maxMinutes: 120,
     durationHelp: 'Після цього Recall знімає повноекранний захист нічного заняття.',
   },
 ] as const;
 
 export type TrackId = typeof LEARNING_TRACKS[number]['id'];
+export type TrackStart = ClockTime | 'activity' | null;
+export type TrackStarts = Partial<Record<TrackId,TrackStart>>;
 export type TrackDurations = Partial<Record<TrackId, number>>;
 export type TrackProgress = Record<TrackId, {done:number; total:number} | null>;
 
@@ -35,5 +39,15 @@ export function validDurations(value:unknown):value is TrackDurations {
 export function trackDuration(id:TrackId, values?:TrackDurations):number {
   const minutes=values?.[id];
   return validDuration(id,minutes)?minutes:defaultDuration(id);
+}
+export function defaultStart(id:TrackId):TrackStart {
+  const track: {defaultStart?:TrackStart}|undefined=tracks.get(id);
+  return track?.defaultStart??null;
+}
+export function validStarts(value:unknown):value is TrackStarts {
+  return !!value&&typeof value==='object'&&!Array.isArray(value)&&Object.entries(value).every(([key,start])=>{
+    const id=key as TrackId;
+    return tracks.has(id)&&(start===null||isClockTime(start)||start==='activity'&&defaultStart(id)==='activity');
+  });
 }
 export const minuteMs=60_000;

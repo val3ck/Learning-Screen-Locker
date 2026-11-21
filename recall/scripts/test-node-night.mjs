@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { _electron as electron, chromium } from 'playwright';
@@ -73,10 +73,17 @@ try {
     assert.equal(await dashboard.locator('#duration-'+id).inputValue(),minutes);
   }
   await dashboard.locator('#duration-nodejs').fill('30');
-  await dashboard.getByRole('button',{name:'Зберегти тривалість'}).click();
-  await dashboard.getByText('Тривалість наступних занять збережено.').waitFor();
+  await dashboard.locator('#schedule-mode-postgresql').selectOption('clock');
+  await dashboard.locator('#schedule-time-postgresql').fill('08:17');
+  await dashboard.locator('#schedule-mode-english').selectOption('none');
+  assert.equal(await dashboard.locator('#schedule-time-english').isDisabled(),true);
+  await dashboard.locator('#schedule-time-nodejs').fill('01:13');
+  await dashboard.getByRole('button',{name:'Зберегти розклад'}).click();
+  await dashboard.getByText('Розклад і тривалість збережено.').waitFor();
   const configured=await dashboard.evaluate(()=>window.recall.bootstrap());
   assert.deepEqual(configured.settings.durationMinutes,{postgresql:15,english:55,nodejs:30});
+  assert.deepEqual(configured.startTimes,{postgresql:'08:17',english:null,nodejs:'01:13'});
+  assert.deepEqual(JSON.parse(await readFile(path.join(configured.settings.statisticsPath,'settings.json'),'utf8')).startTimes,configured.startTimes);
   await app.evaluate(({BrowserWindow,screen})=>{
     BrowserWindow.prototype.setKiosk=function(){};
     BrowserWindow.prototype.setFullScreen=function(){};
@@ -142,6 +149,18 @@ try {
   await normal.getByRole('tab',{name:'Перевірка'}).click();
   assert.equal(await normal.locator('.lesson-criteria input').first().isChecked(),true);
   assert.equal(await normal.locator('.notes-label textarea').inputValue(),'Після редактора: тест пройшов.');
+  await dashboard.locator('#schedule-mode-nodejs').selectOption('none');
+  await dashboard.getByRole('button',{name:'Зберегти розклад'}).click();
+  await dashboard.getByText('Розклад і тривалість збережено.').waitFor();
+  await dashboard.locator('#nav-home').click();
+  await dashboard.locator('#start-node').click();
+  const manual=await findWindow(origin+'/#/lesson/setup-tools');
+  await manual.locator('.night-bar').waitFor();
+  assert.equal(app.windows().some(win=>win.url().includes('/app/node-night.html')),false);
+  await app.evaluate(()=>globalThis.__recallNodeTick(Date.now()+31*60_000));
+  await manual.getByRole('button',{name:'Зберегти й вийти'}).click();
+  await waitFor(()=>manual.isClosed(),'manual practice can finish');
+  console.log('PASS exact schedule settings persisted, with manual Node.js when set to None');
   console.log('PASS permission boundary, mock power-off, two display covers, original course, Luna demo, editor, shared practice, configured 30-minute release');
 } finally {
   if (app) {

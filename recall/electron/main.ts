@@ -1,4 +1,4 @@
-import {trackDuration,validDurations,type TrackProgress} from '../src/core/tracks';
+import {defaultStart,trackDuration,validDurations,validStarts,type TrackProgress,type TrackStart} from '../src/core/tracks';
 import {app,BrowserWindow,Menu,Tray,nativeImage,ipcMain,powerMonitor,Notification,screen,shell,dialog,protocol,net,globalShortcut} from 'electron';
 import {readFile,stat} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
@@ -12,7 +12,7 @@ import type {Bootstrap,ModuleState,ScheduleState,SessionRecord,Settings} from '.
 import {getModule} from '../src/modules/registry';
 import {tickSchedule,snoozeSchedule,WARNING_MS,needsWarning,automaticDayAllowed,hasFinishedToday,completeScheduleForDay} from '../src/core/scheduler';
 import {createSession,updateHistory,canSurrender,sqlDuration,addSpeedBonus,isStaleSessionUpdate,availableTopicIds,learnedTopics} from '../src/core/session';
-import {dayKey,kyivDayKey,kyivParts} from '../src/core/calendar';
+import {dayKey,formatClockTime,isClockTime,kyivDayKey} from '../src/core/calendar';
 import {FocusClock} from '../src/core/learning';
 import {EnglishHost} from './english-host';
 import type {EnglishView} from '../src/modules/english/types';
@@ -85,7 +85,7 @@ function nativeTaskBusy(){return englishNative||!!pendingFocusId||!!activeSessio
 function taskBusy(){return nativeTaskBusy()||!!nodeNight?.busy;}
 function updateTray(){
   if(!tray)return;
-  tray.setContextMenu(Menu.buildFromTemplate([{label:focusTaskActive()?'Повернутися до задачі':'Відкрити SQL Recall',click:showDashboard},{label:'Пара / демонстрація — відкласти на 30 хв',enabled:!focusTaskActive(),click:()=>void snoozeDaily()},{label:'Потренуватися зараз',enabled:!taskBusy(),click:()=>void begin('practice')},{label:'English · почати / продовжити',enabled:!taskBusy(),click:()=>void beginEnglish().catch(error=>{store.messages.push(String(error));showDashboard();})},{label:'Node.js · повернутися до уроку',visible:!!nodeNight?.canResume,click:()=>nodeNight.resume()},{label:'Нічний Node.js · налаштування',enabled:!taskBusy(),click:()=>nodeNight.openSettings()},{label:'Завершити програму',enabled:!focusTaskActive(),click:()=>app.quit()}]));
+  tray.setContextMenu(Menu.buildFromTemplate([{label:focusTaskActive()?'Повернутися до задачі':'Відкрити SQL Recall',click:showDashboard},{label:'Пара / демонстрація — відкласти на 30 хв',enabled:!focusTaskActive(),click:()=>void snoozeDaily()},{label:'Потренуватися зараз',enabled:!taskBusy(),click:()=>void begin('practice')},{label:'English · почати / продовжити',enabled:!taskBusy(),click:()=>void beginEnglish().catch(error=>{store.messages.push(String(error));showDashboard();})},{label:'Node.js · повернутися до уроку',visible:!!nodeNight?.canResume,click:()=>nodeNight.resume()},{label:'Node.js · потренуватися',enabled:!taskBusy(),click:()=>void nodeNight.startPractice().catch(error=>{store.messages.push(String(error));showDashboard();})},{label:'Node.js · налаштування',enabled:!taskBusy(),click:()=>nodeNight.openSettings()},{label:'Завершити програму',enabled:!focusTaskActive(),click:()=>app.quit()}]));
 }
 let warningPanel:WarningPanel,shortcutAvailable=false,warningPreview=false,previewUntil=0,snoozing=false;
 const SNOOZE_SHORTCUT='Control+Shift+A';
@@ -211,7 +211,16 @@ async function trackProgress():Promise<TrackProgress>{
     nodejs:await nodeNight?.progress()??null,
   };
 }
-async function bootstrap():Promise<Bootstrap>{await pollProgress();return {settings,tracks:await trackProgress(),module:moduleState,schedule,sessions,demo,sqlAI:sqlAI?.status(),recoveryMessages:store.messages,activeSession:activeSession&&!activeSession.endedAt?activeSession:null,shortcutAvailable,english:englishHost?{...englishHost.view(),aiSettings:englishAI?.settings()}:undefined,activeLearningSession:englishNative?englishHost.controller.snapshot():activeSession&&!activeSession.endedAt?getModule(activeSession.moduleId).controller?.restore(activeSession).snapshot():null};}
+function startTimes():Bootstrap['startTimes']{
+  const times=settings.startTimes;
+  const legacyEnglish=settings.englishEnabled===false?null:formatClockTime(settings.englishStartHour??19);
+  return {
+    postgresql:times?.postgresql===undefined?defaultStart('postgresql'):times.postgresql,
+    english:times?.english===undefined?legacyEnglish:times.english,
+    nodejs:nodeNight?.startTime??null,
+  };
+}
+async function bootstrap():Promise<Bootstrap>{await pollProgress();return {settings,tracks:await trackProgress(),startTimes:startTimes(),module:moduleState,schedule,sessions,demo,sqlAI:sqlAI?.status(),recoveryMessages:store.messages,activeSession:activeSession&&!activeSession.endedAt?activeSession:null,shortcutAvailable,english:englishHost?{...englishHost.view(),aiSettings:englishAI?.settings()}:undefined,activeLearningSession:englishNative?englishHost.controller.snapshot():activeSession&&!activeSession.endedAt?getModule(activeSession.moduleId).controller?.restore(activeSession).snapshot():null};}
 async function beginEnglish(mode:'daily'|'practice'|'demo'='practice',notify=true,extend=false,lessonId?:string){
   if(nodeNight?.busy)throw Error('Нічний Node.js уже відкрито.');
   if(activeSession&&!activeSession.endedAt&&!activeSession.paused){showDashboard();throw new Error('Спочатку заверши або збережи SQL-сесію.');}
@@ -243,11 +252,20 @@ async function installHandlers(){
   const handle=(name:string,handler:(...args:any[])=>unknown)=>ipcMain.handle(name,(event,...args)=>{const allowedWarning=['recall:warning-status','recall:snooze','recall:start-now'].includes(name)&&event.sender===warningPanel?.window?.webContents;if(event.sender!==window?.webContents&&!allowedWarning)throw new Error('Невідоме вікно.');return handler(...args);});
   handle('recall:bootstrap',bootstrap);
   handle('recall:track-progress',trackProgress);
-  handle('recall:configure-durations',async(value:unknown)=>{
-    if(!validDurations(value))throw Error('Задай тривалість у цілих хвилинах у межах поля.');
-    settings={...settings,durationMinutes:{...settings.durationMinutes,...value}};
+  handle('recall:configure-tracks',async(value:{durationMinutes?:unknown;startTimes?:unknown})=>{
+    if(!value||!validDurations(value.durationMinutes)||!validStarts(value.startTimes))throw Error('Перевір час доби та тривалість занять.');
+    const previous=startTimes();
+    settings={...settings,durationMinutes:{...settings.durationMinutes,...value.durationMinutes},startTimes:{...settings.startTimes,...value.startTimes}};
+    const next=startTimes(),sqlChanged=previous.postgresql!==next.postgresql,englishChanged=previous.english!==next.english;
+    if(sqlChanged)schedule={...schedule,warned:false,warningRemainingMs:undefined,lastTick:Date.now()};
+    if(englishChanged)englishSchedule={...englishSchedule,offered:false,warningRemainingMs:WARNING_MS,lastTick:Date.now()};
+    if(!warningPreview&&((sqlChanged&&warningModule==='postgresql')||(englishChanged&&warningModule==='english'))){hideWarning();disarmShortcut();}
+    if(previous.nodejs!==next.nodejs)await nodeNight?.scheduleChanged();
     await store.write('settings.json',settings);
+    if(sqlChanged)await store.write('schedule.json',schedule);
+    if(englishChanged)await store.write('schedules/english.json',englishSchedule);
   });
+  handle('recall:node-practice',()=>nodeNight.startPractice());
   handle('recall:sql-ai',async(request:any)=>{if(!request||!['settings','prepare','test'].includes(request.action))throw Error('Невідома SQL AI-дія.');if(request.action==='settings')return request.options?sqlAI.save(request.options):sqlAI.status();if(request.action==='test')return sqlAI.test();await sqlAI.prepare(moduleState,sessions,true);return sqlAI.status();});
   handle('recall:sql-chat',(request:unknown)=>sqlChat.ask(activeSession,request));
   handle('recall:configure',async(value:{autoStart:boolean;minPracticeMinutes?:number})=>{if(!value||typeof value.autoStart!=='boolean'||value.minPracticeMinutes!==undefined&&![5,7,10,15].includes(value.minPracticeMinutes))throw new Error('Некоректні налаштування.');if(!settings.setupComplete){returnSignal=true;settings.dailyEnabledAfterDay=dayKey(new Date());}settings={...settings,setupComplete:true,autoStart:demo||smoke?false:value.autoStart,minPracticeMinutes:value.minPracticeMinutes??settings.minPracticeMinutes};if(!demo&&!smoke)setRecallLoginItem(settings.autoStart);await store.write('settings.json',settings);});
@@ -259,7 +277,6 @@ async function installHandlers(){
   });
   handle('recall:english-action',async(action:any)=>{if(!action||typeof action.type!=='string'||action.type.length>60||action.key!==undefined&&typeof action.key!=='string'||action.value!==undefined&&typeof action.value!=='string'||action.flag!==undefined&&typeof action.flag!=='boolean'||action.area!==undefined&&typeof action.area!=='string')throw new Error('Invalid English action.');if(action.type==='snooze'){if(!focusTaskActive()){warningModule='english';await snoozeDaily();}return englishHost.view();}return englishHost.action(action);});
   handle('recall:english-finish',async(reason:unknown)=>{if(reason!=='surrendered'&&reason!=='completed')throw new Error('Некоректне завершення.');englishHost.finish(reason);englishNative=false;tearingDown=true;clearOverlays();tearingDown=false;englishSchedule.finished=true;await store.write('schedules/english.json',englishSchedule);emit('english');return englishHost.view();});
-  handle('recall:english-configure',async(value:any)=>{if(!value||typeof value.enabled!=='boolean'||!Number.isInteger(value.startHour)||value.startHour<17||value.startHour>22)throw new Error('Invalid English schedule.');if(value.enabled){const today=kyivDayKey(new Date());if(!settings.englishEnabledAfterDay||settings.englishEnabledAfterDay>=today){const previous=new Date(today+'T12:00:00Z');previous.setUTCDate(previous.getUTCDate()-1);settings.englishEnabledAfterDay=previous.toISOString().slice(0,10);}}const hour=kyivParts(new Date()).hour;if(warningModule==='english'&&(!value.enabled||hour>=5&&hour<value.startHour)){hideWarning();disarmShortcut();englishSchedule.offered=false;}settings.englishEnabled=value.enabled;settings.englishStartHour=value.startHour;await store.write('settings.json',settings);});
   handle('recall:english-open',(id:unknown)=>{if(id!==undefined&&(typeof id!=='string'||!/^[a-z0-9.-]{3,100}$/.test(id)))throw Error('Invalid review rule.');return openEnglish(id as string|undefined);});
   handle('recall:english-import',async()=>{const result=await dialog.showOpenDialog(window!,{title:'Import English Daily',filters:[{name:'JSON',extensions:['json']}],properties:['openFile']});if(result.canceled)return {ok:false,message:'Import cancelled.'};try{if((await stat(result.filePaths[0])).size>20000000)throw new Error('The file is larger than 20 MB.');englishHost.import(JSON.parse(await readFile(result.filePaths[0],'utf8')));emit('english');return {ok:true,message:'English progress imported. A backup was saved.'};}catch(error){return {ok:false,message:String(error)};}});
   handle('recall:english-audio-save',(key:string,bytes:number[],mime:string)=>englishHost.saveAudio(key,bytes,mime));
@@ -386,7 +403,7 @@ englishHost.controller.assessmentBundle(area);const result=await englishAI.grade
 async function tick(){
   if(tickBusy||quitting)return;tickBusy=true;
   try{
-    const now=new Date();const idle=powerMonitor.getSystemIdleTime();const active=!locked&&!suspended&&(idle<300||mediaUntil>Date.now());
+    const now=new Date(),starts=startTimes();const idle=powerMonitor.getSystemIdleTime();const active=!locked&&!suspended&&(idle<300||mediaUntil>Date.now());
     void nodeNight?.tick(now,!locked&&!suspended&&idle<300);
     const elapsed=clock.sample(performance.now(),active&&!pendingFocusId&&!!window?.isFocused()&&waitingUntil<Date.now());
     if(englishNative){const before=englishHost.controller.snapshot();const oldPhase=before?.payload.phase,oldOvertime=before?.payload.overtimeBlock;englishHost.tick(elapsed,active);const run=englishHost.controller.snapshot();if(run?.endedAt){englishHost.release();englishNative=false;tearingDown=true;clearOverlays();tearingDown=false;if(englishHost.done()){englishSchedule.finished=true;await store.write('schedules/english.json',englishSchedule);}emit('english');}else if(oldPhase!==run?.payload.phase||oldOvertime!==run?.payload.overtimeBlock)emit('english');}
@@ -398,14 +415,14 @@ async function tick(){
     }else if(!demo&&settings.setupComplete){
       if(hasFinishedToday(sessions,now)&&!focusTaskActive())schedule=completeScheduleForDay(schedule,now);
       if(!taskBusy()&&!locked&&!suspended)void sqlAI.prepare(moduleState,sessions);
-      const canSchedule=!nodeNight?.busy&&!englishNative&&automaticDayAllowed(now,settings.dailyEnabledAfterDay)&&!!availableTopicIds(moduleState).length&&(!activeSession||!!activeSession.endedAt||!!activeSession.paused);
-      const result=tickSchedule(schedule,{now,active,returned,hasProgress:canSchedule,warningVisible:warningPanel.visible&&warningModule==='postgresql'});schedule=result.state;
-      if(!englishNative&&active&&canSchedule&&warningModule!=='english'&&needsWarning(now)&&schedule.warned&&!schedule.triggered&&!schedule.finished&&!schedule.snoozedUntil){armShortcut();warningPanel.show(warningStatus());warningPanel.update(warningStatus());}
+      const canSchedule=starts.postgresql!==null&&!nodeNight?.busy&&!englishNative&&!(warningPanel.visible&&warningModule==='english')&&automaticDayAllowed(now,settings.dailyEnabledAfterDay)&&!!availableTopicIds(moduleState).length&&(!activeSession||!!activeSession.endedAt||!!activeSession.paused);
+      const result=tickSchedule(schedule,{now,active,returned,hasProgress:canSchedule,warningVisible:warningPanel.visible&&warningModule==='postgresql',start:starts.postgresql});schedule=result.state;
+      if(!englishNative&&active&&canSchedule&&warningModule!=='english'&&needsWarning(now,starts.postgresql)&&schedule.warned&&!schedule.triggered&&!schedule.finished&&!schedule.snoozedUntil){armShortcut();warningPanel.show(warningStatus());warningPanel.update(warningStatus());}
       else if(!focusSurface&&warningModule!=='english'){hideWarning();disarmShortcut();}
       if(result.action==='start'){hideWarning();await store.write('schedule.json',schedule);if(schedule.triggered&&!schedule.snoozedUntil&&!locked&&!suspended&&!englishNative)await begin('daily');}
     }
-    if(!nodeNight?.busy&&!demo&&settings.setupComplete&&settings.englishEnabled&&englishAI.settings().configured){
-      const result=tickEvening(englishSchedule,{now,active,busy:taskBusy()||englishHost.readonly()||warningPanel.visible&&warningModule==='postgresql',enabledAfterDay:settings.englishEnabledAfterDay!,done:englishHost.done(),warningVisible:warningPanel.visible&&warningModule==='english',returned,startHour:settings.englishStartHour});englishSchedule=result.state;englishOptional=result.optional;
+    if(!nodeNight?.busy&&!demo&&settings.setupComplete&&isClockTime(starts.english)&&englishAI.settings().configured){
+      const result=tickEvening(englishSchedule,{now,active,busy:taskBusy()||englishHost.readonly()||warningPanel.visible&&warningModule==='postgresql',enabledAfterDay:settings.englishEnabledAfterDay!,done:englishHost.done(),warningVisible:warningPanel.visible&&warningModule==='english',returned,start:starts.english});englishSchedule=result.state;englishOptional=result.optional;
       if(result.action==='warn'){warningModule='english';armShortcut();warningPanel.show(warningStatus());warningPanel.update(warningStatus());}
       if(result.action==='start'){hideWarning();disarmShortcut();await beginEnglish('daily');}
       if(warningModule==='english'&&(!active||taskBusy()||englishHost.readonly()||englishSchedule.finished||!englishSchedule.offered||englishSchedule.snoozedUntil)){hideWarning();disarmShortcut();}
@@ -458,6 +475,8 @@ if(launchLock)void app.whenReady().then(async()=>{
     store, coursePath:await resolveNodePath(projectRoot,app.isPackaged,settings.coursePath), preloadRoot:__dirname, englishAI,
     separateApiKey:aiEnv.NODE_OPENAI_API_KEY,
     durationMinutes:()=>trackDuration('nodejs',settings.durationMinutes),
+    scheduledTime:()=>{const value:TrackStart|undefined=settings.startTimes?.nodejs;return value===null||isClockTime(value)?value:undefined;},
+    canOffer:()=>!warningPanel.visible,
     isolated:demo||smoke,
     testPort:demo&&process.env.RECALL_TEST_CLOCK==='1'?Number(process.env.RECALL_TEST_NODE_PORT):undefined,
     exerciseGuard:demo&&process.env.RECALL_TEST_NODE_GUARD==='1',

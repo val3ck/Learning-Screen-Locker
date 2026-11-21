@@ -11,7 +11,6 @@ async function action(work) {
   }
 }
 function settings(state) {
-  document.querySelector('#enabled').checked = state.enabled;
   description.textContent = state.separateKey
     ? 'Збережено окремий ключ. Запити використовують квоту цього ключа.'
     : state.sharedConfigured ? 'Підключено ключ English і спільний локальний лічильник.' : 'Ключ English недоступний. Введи окремий ключ за потреби.';
@@ -25,13 +24,15 @@ void action(async () => {
       document.querySelector('#sleep').textContent = 'Спати · демо';
     }
     document.querySelector('#learn').onclick = () => void action(() => api.choose('learn'));
-    document.querySelector('#sleep').onclick = () => void action(() => api.choose('sleep'));
+    const secondary=document.querySelector('#sleep');
+    if(!state.canSleep)secondary.textContent='Пропустити';
+    secondary.onclick = () => void action(() => api.choose(state.canSleep?'sleep':'dismiss'));
     return;
   }
   settings(state);
   const save = shared => action(async () => {
     const key = document.querySelector('#key');
-    settings(await api.save({enabled: document.querySelector('#enabled').checked, key: shared ? '' : key.value, shared}));
+    settings(await api.save({key: shared ? '' : key.value, shared}));
     key.value = '';
     message.textContent = 'Збережено.';
     message.hidden = false;

@@ -7,7 +7,8 @@ import {EnglishScreen} from './modules/english/view';
 let englishScreen:EnglishScreen|null=null;
 import type {Bootstrap,SessionRecord,ExecutionResult,DataTable,Runner} from './core/contracts';
 import {getModule} from './modules/registry';
-import {LEARNING_TRACKS,minuteMs,trackDuration,type TrackDurations} from './core/tracks';
+import {isClockTime} from './core/calendar';
+import {defaultStart,LEARNING_TRACKS,minuteMs,trackDuration,type TrackDurations,type TrackStart,type TrackStarts} from './core/tracks';
 import {recordAttempt,canSurrender,sqlDuration,surrenderMessage,availableTopicIds} from './core/session';
 const root=document.querySelector<HTMLDivElement>('#app')!;
 const sqlChat=new SQLChatView((sessionId,taskId)=>{
@@ -25,11 +26,14 @@ const minutes=(ms:number)=>Math.floor(ms/60000);
 const time=(ms:number)=>`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
 function module(){return getModule(boot.settings.activeModuleId);}
 function button(id:string,label:string,kind='',disabled=false){return `<button id="${id}" class="button ${kind}" ${disabled?'disabled':''}>${label}</button>`;}
+function scheduleLabel(start:TrackStart){
+  return start==='activity'?'Після активності':start??'Вручну';
+}
 function trackRows(){
   return LEARNING_TRACKS.map(track=>{
     const progress=boot.tracks[track.id];
     const nominal=trackDuration(track.id,boot.settings.durationMinutes);
-    return `<li class="sidebar-course"><div class="sidebar-track-heading"><strong>${track.title}</strong><span>${nominal} хв</span></div>
+    return `<li class="sidebar-course"><div class="sidebar-track-heading"><strong>${track.title}</strong><span>${nominal} хв</span></div><small class="sidebar-track-time">${scheduleLabel(boot.startTimes[track.id])}</small>
       ${progress?`<small>${progress.done} / ${progress.total} ${track.progressLabel}</small>
         <progress class="sidebar-meter" max="${Math.max(1,progress.total)}" value="${progress.done}" aria-label="${track.title} · ${track.progressLabel}"></progress>`:'<small>Очікує синхронізації</small>'}</li>`;
   }).join('');
@@ -40,13 +44,30 @@ function syncTrackRows(tracks:Bootstrap['tracks']){
   const list=$('sidebar-tracks');
   if(list)list.innerHTML=trackRows();
 }
-function durationSettings(){
-  return `<section class="panel settings-panel"><form id="track-duration-form">
-    <h2>Тривалість занять</h2>
-    <p class="fine-print">Зміни діють з наступної сесії.</p>
-    ${LEARNING_TRACKS.map(track=>`<label class="setting-row" for="duration-${track.id}"><span><strong>${track.activity}</strong><small>${track.durationHelp}</small></span>
-      <span class="duration-input"><input id="duration-${track.id}" type="number" inputmode="numeric" required min="${track.minMinutes}" max="${track.maxMinutes}" step="1" value="${trackDuration(track.id,boot.settings.durationMinutes)}"><span>хв</span></span></label>`).join('')}
-    <button class="button primary" type="submit">Зберегти тривалість</button>
+function scheduleSettings(){
+  return `<section class="panel settings-panel"><form id="track-schedule-form">
+    <h2>Розклад і тривалість</h2>
+    <p class="schedule-explainer">Recall запрошує у вибраний час за Києвом. «Без розкладу» залишає ручний запуск. Нова тривалість діє з наступної сесії.</p>
+    ${LEARNING_TRACKS.map(track=>{
+      const start=boot.startTimes[track.id],mode=start===null?'none':start==='activity'?'activity':'clock';
+      const suggested=defaultStart(track.id);
+      return `<fieldset class="track-settings-row">
+        <legend>${track.activity}</legend>
+        <div class="track-settings-fields"><label>Коли
+          <select id="schedule-mode-${track.id}" aria-label="${track.title} · режим запуску">
+            <option value="none" ${mode==='none'?'selected':''}>Без розкладу</option>
+            <option value="clock" ${mode==='clock'?'selected':''}>Щодня за часом</option>
+            ${suggested==='activity'?`<option value="activity" ${mode==='activity'?'selected':''}>Через 1–2 год активності</option>`:''}
+          </select>
+        </label>
+        <label id="schedule-time-label-${track.id}" ${mode==='clock'?'':'hidden'}>Час за Києвом
+          <input id="schedule-time-${track.id}" type="time" step="60" required ${mode==='clock'?'':'disabled'} value="${isClockTime(start)?start:isClockTime(suggested)?suggested:''}" aria-label="${track.title} · час запуску">
+        </label>
+        <label>Скільки<span class="duration-input"><input id="duration-${track.id}" type="number" inputmode="numeric" required min="${track.minMinutes}" max="${track.maxMinutes}" step="1" value="${trackDuration(track.id,boot.settings.durationMinutes)}" aria-label="${track.title} · тривалість"><span>хв</span></span></label></div>
+        <small>${track.durationHelp}</small>
+      </fieldset>`;
+    }).join('')}
+    <button class="button primary" type="submit">Зберегти розклад</button>
   </form></section>`;
 }
 function shell(content:string){
@@ -60,17 +81,24 @@ function shell(content:string){
 function navigate(next:typeof page){if(boot.activeLearningSession?.moduleId==='english'&&boot.activeLearningSession.status==='active'){page='english';render();return;}if(session&&!session.endedAt&&!session.paused){notice='Поточна сесія збережена. Спочатку заверши її або повернися до вправ.';page=session.paused?'paused':'session';render();return;}page=next;notice='';render();}
 function home(){
   const progress=boot.module.progress;const count=availableTopicIds(boot.module).length;
-  const duration=trackDuration('postgresql',boot.settings.durationMinutes);
+  const duration=trackDuration('postgresql',boot.settings.durationMinutes),sqlStart=boot.startTimes.postgresql;
+  const reminder=sqlStart==='activity'?'До 16:00 Recall показує запрошення. Після 16:00 задача відкривається одразу.':sqlStart?`SQL · запрошення о ${sqlStart} за Києвом.`:'SQL доступний для ручної практики.';
+  const postponed=boot.schedule.snoozedUntil&&boot.schedule.snoozedUntil>Date.now()?`Сесію відкладено до ${new Date(boot.schedule.snoozedUntil).toLocaleTimeString('uk-UA',{timeZone:'Europe/Kyiv',hour:'2-digit',minute:'2-digit'})}`:reminder;
   const history=Object.values(boot.module.history);const reviewed=history.filter(h=>h.lastReviewedAt).length;
   const last=boot.sessions.filter(s=>s.endedAt&&s.mode!=='demo').at(-1);
   const confirmed=module().catalog.filter(t=>availableTopicIds(boot.module).includes(t.id));
   const chapter=confirmed.length?Math.max(...confirmed.map(t=>t.chapter)):0;
-  shell(`<div class="meeting-strip"><span>${boot.schedule.snoozedUntil&&boot.schedule.snoozedUntil>Date.now()?`Сесію відкладено до ${new Date(boot.schedule.snoozedUntil).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'})}`:'До 16:00 — запрошення справа знизу. Після 16:00 задача відкриється одразу.'}</span>${button('postpone-home','Пара / демонстрація · 30 хв','secondary')}</div><section class="page-heading"><div class="eyebrow"><span class="small-line"></span> ПОВЕРТАЙСЯ ДО ТОГО, ЩО ВЖЕ ЗНАЄШ</div><h1>Знання люблять<br><em>невеликі нагадування.</em></h1><p>Три вправи, щоб згадати вивчене та впевненіше рухатися далі.<br>Сьогодні працюємо з ${escape(module().manifest.title)}.</p></section><section class="hero-grid"><article class="practice-card"><div class="card-top"><span class="pill">ЩОДЕННА ПРАКТИКА</span><span class="muted">01 — 03</span></div><div class="practice-symbol">{ <span>sql</span> }</div><h2>${count?'Трохи SQL. І день твій.':'Почнемо з твого прогресу.'}</h2><p>${count?'Розігрів, тема для повторення і невеликий робочий звіт. Завдання з тренажера й теми, які ти вже відпрацював у Recall.':'Відкрий звичний тренажер або імпортуй його прогрес. Тоді тут з’являться вправи саме на вивчені теми.'}</p><div class="practice-meta"><span>◷ ${duration} хв</span><span>⌘ 3 вправи</span><span>↗ Luna поруч</span></div>${button(count?'start-practice':'open-course',count?'Потренуватися зараз <span>↗</span>':'Відкрити SQL-тренажер <span>↗</span>','primary wide')}<small class="card-footnote">${count?`Почати у повноекранному режимі на всіх моніторах. Можеш вийти після виконання вправ або через ${duration} хв практики.`:'Поки прогрес не підключено, повноекранні сесії не запускаються.'}</small></article><div class="right-stack"><article class="progress-card"><div class="card-top"><h3>Твоя відправна точка</h3><span class="icon-box">↗</span></div><div class="progress-number">${count}<span>/ ${module().catalog.length} тем</span></div><p>${count?`Доступні теми до розділу ${chapter}.<br>Нові навчальні кроки додаються після правильної перевірки.`:'Підключи прогрес — і ми почнемо<br>з того місця, де ти зараз.'}</p><div class="wide-progress"><i style="width:${count/module().catalog.length*100}%"></i></div><div class="card-divider"></div><div class="mini-stat"><span>Уже повторено</span><strong>${reviewed} тем</strong></div><div class="mini-stat"><span>Останнє повернення</span><strong>${last?new Date(last.startedAt).toLocaleDateString('uk-UA'):'Попереду'}</strong></div></article><article class="quiet-card"><span class="leaf">✳</span><div><h3>Повторення — не іспит</h3><p>Не потрібно пам’ятати все одразу. Підказка — частина навчання, а не помилка.</p></div></article></div></section>${englishOverview()}<section class="below-grid"><article class="flow-card"><div class="section-caption">ЯК ПРОХОДИТЬ СЕСІЯ</div><div class="flow-steps"><div><span>01</span><h4>Згадати знайоме</h4><p>Спокійний розігрів.</p></div><div><span>02</span><h4>Освіжити деталі</h4><p>Тема, до якої час повернутися.</p></div><div><span>03</span><h4>Поєднати навички</h4><p>Невеликий робочий сценарій.</p></div></div></article><article class="sync-card"><div class="section-caption">ЗВ’ЯЗОК ІЗ ТРЕНАЖЕРОМ</div><p>${progress?'Остання синхронізація: '+new Date(progress.syncedAt).toLocaleString('uk-UA'):'Навчання залишається у твоєму тренажері. Тут — повторення.'}</p><button class="text-button" id="import-progress">Імпортувати JSON <span>↗</span></button>${count?'<button class="text-button" id="open-course">Відкрити тренажер <span>↗</span></button>':''}</article></section>${!boot.settings.setupComplete?`<section class="setup-strip"><div><strong>Зробимо повторення звичкою?</strong><p>Автоматичні сесії почнуться з наступного навчального дня після 1–2 годин користування ПК.</p></div><label class="checkbox"><input type="checkbox" id="setup-autostart" checked> Запускати разом із Windows</label>${button('finish-setup','Зберегти налаштування','secondary')}</section>`:''}`);
+  shell(`<div class="meeting-strip"><span>${postponed}</span>${button('postpone-home','Пара / демонстрація · 30 хв','secondary',sqlStart===null)}</div><section class="page-heading"><div class="eyebrow"><span class="small-line"></span> ПОВЕРТАЙСЯ ДО ТОГО, ЩО ВЖЕ ЗНАЄШ</div><h1>Знання люблять<br><em>невеликі нагадування.</em></h1><p>Три вправи, щоб згадати вивчене та впевненіше рухатися далі.<br>Сьогодні працюємо з ${escape(module().manifest.title)}.</p></section><section class="hero-grid"><article class="practice-card"><div class="card-top"><span class="pill">ЩОДЕННА ПРАКТИКА</span><span class="muted">01 — 03</span></div><div class="practice-symbol">{ <span>sql</span> }</div><h2>${count?'Трохи SQL. І день твій.':'Почнемо з твого прогресу.'}</h2><p>${count?'Розігрів, тема для повторення і невеликий робочий звіт. Завдання з тренажера й теми, які ти вже відпрацював у Recall.':'Відкрий звичний тренажер або імпортуй його прогрес. Тоді тут з’являться вправи саме на вивчені теми.'}</p><div class="practice-meta"><span>◷ ${duration} хв</span><span>⌘ 3 вправи</span><span>↗ Luna поруч</span></div>${button(count?'start-practice':'open-course',count?'Потренуватися зараз <span>↗</span>':'Відкрити SQL-тренажер <span>↗</span>','primary wide')}<small class="card-footnote">${count?`Почати у повноекранному режимі на всіх моніторах. Можеш вийти після виконання вправ або через ${duration} хв практики.`:'Поки прогрес не підключено, повноекранні сесії не запускаються.'}</small></article><div class="right-stack"><article class="progress-card"><div class="card-top"><h3>Твоя відправна точка</h3><span class="icon-box">↗</span></div><div class="progress-number">${count}<span>/ ${module().catalog.length} тем</span></div><p>${count?`Доступні теми до розділу ${chapter}.<br>Нові навчальні кроки додаються після правильної перевірки.`:'Підключи прогрес — і ми почнемо<br>з того місця, де ти зараз.'}</p><div class="wide-progress"><i style="width:${count/module().catalog.length*100}%"></i></div><div class="card-divider"></div><div class="mini-stat"><span>Уже повторено</span><strong>${reviewed} тем</strong></div><div class="mini-stat"><span>Останнє повернення</span><strong>${last?new Date(last.startedAt).toLocaleDateString('uk-UA'):'Попереду'}</strong></div></article><article class="quiet-card"><span class="leaf">✳</span><div><h3>Повторення — не іспит</h3><p>Не потрібно пам’ятати все одразу. Підказка — частина навчання, а не помилка.</p></div></article></div></section>${englishOverview()}${nodeOverview()}<section class="below-grid"><article class="flow-card"><div class="section-caption">ЯК ПРОХОДИТЬ СЕСІЯ</div><div class="flow-steps"><div><span>01</span><h4>Згадати знайоме</h4><p>Спокійний розігрів.</p></div><div><span>02</span><h4>Освіжити деталі</h4><p>Тема, до якої час повернутися.</p></div><div><span>03</span><h4>Поєднати навички</h4><p>Невеликий робочий сценарій.</p></div></div></article><article class="sync-card"><div class="section-caption">ЗВ’ЯЗОК ІЗ ТРЕНАЖЕРОМ</div><p>${progress?'Остання синхронізація: '+new Date(progress.syncedAt).toLocaleString('uk-UA'):'Навчання залишається у твоєму тренажері. Тут — повторення.'}</p><button class="text-button" id="import-progress">Імпортувати JSON <span>↗</span></button>${count?'<button class="text-button" id="open-course">Відкрити тренажер <span>↗</span></button>':''}</article></section>${!boot.settings.setupComplete?`<section class="setup-strip"><div><strong>Зробимо повторення звичкою?</strong><p>Запрошення з’являтимуться за розкладом у налаштуваннях.</p></div><label class="checkbox"><input type="checkbox" id="setup-autostart" checked> Запускати разом із Windows</label>${button('finish-setup','Зберегти налаштування','secondary')}</section>`:''}`);
   $('open-english')?.addEventListener('click',()=>navigate('english'));$('postpone-home')?.addEventListener('click',()=>void postpone());
+  $('start-node')?.addEventListener('click',()=>void action(()=>window.recall.nodePractice()));
   $('start-practice')?.addEventListener('click',()=>void start());bindCourse();bindImport();
   $('finish-setup')?.addEventListener('click',()=>void action(async()=>{await window.recall.configure({autoStart:$<HTMLInputElement>('setup-autostart')!.checked});await refresh();notice='Готово. Розклад працюватиме після підключення прогресу.';render();}));
 }
-function englishOverview(){const v=boot.english;return `<section class="panel en-overview" lang="en"><div class="panel-heading"><h2>Evening English · ${boot.settings.englishStartHour??19}:00</h2>${button('open-english','Open English →','primary')}</div><p>${trackDuration('english',boot.settings.durationMinutes)} active minutes to start lesson blocks, with an optional break. ${v?`${v.completedLessons}/${v.totalLessons} lessons · ${time(v.day.activeMs)} of ${time(v.targetMs)} today.`:'English progress has its own history.'}</p><p class="fine-print">After 23:00, practice is optional. ${boot.settings.englishEnabled?'Automatic sessions are on.':'Automatic sessions are off.'}</p></section>`;}
+function englishOverview(){const v=boot.english;return `<section class="panel en-overview" lang="en"><div class="panel-heading"><h2>English · ${boot.startTimes.english??'Manual practice'}</h2>${button('open-english','Open English →','primary')}</div><p>${trackDuration('english',boot.settings.durationMinutes)} active minutes to start lesson blocks, with an optional break. ${v?`${v.completedLessons}/${v.totalLessons} lessons · ${time(v.day.activeMs)} of ${time(v.targetMs)} today.`:'English progress has its own history.'}</p><p class="fine-print">${boot.startTimes.english?'Invitation time in Kyiv.':'Available from this screen.'}</p></section>`;}
+function nodeOverview(){
+  const start=boot.startTimes.nodejs,duration=trackDuration('nodejs',boot.settings.durationMinutes);
+  return `<section class="panel en-overview"><div class="panel-heading"><h2>Node.js · ${scheduleLabel(start)}</h2>${button('start-node','Потренуватися →','secondary')}</div><p>${duration} хв · Backend Path</p></section>`;
+}
 function englishPage(){if(!boot.english){shell('<section class="panel"><h1>English is temporarily unavailable</h1><p>Check your saved progress or open settings.</p></section>');return;}shell('<div id="english-workspace" lang="en"></div>');englishScreen=new EnglishScreen($('english-workspace')!,boot.english,value=>{boot.english=value;if(value.run?.status==='active'&&!value.run.endedAt||boot.activeLearningSession?.moduleId==='english')boot.activeLearningSession=value.run;document.body.classList.toggle('focus-session',value.run?.status==='active'&&!value.run.endedAt);},()=>navigate('home'));const run=boot.activeLearningSession;if(run?.moduleId==='english'&&run.status==='active')void window.recall.sessionReady(run.id).catch(error=>{notice=String(error);});}
 function renderTables(tables:DataTable[],schema=false):string{
   if(!tables.length)return '<div class="empty-state">Запит виконано. Рядків для показу немає.</div>';
@@ -142,23 +170,36 @@ function statistics(){
   document.querySelectorAll<HTMLButtonElement>('[data-review-session]').forEach(button=>button.addEventListener('click',()=>{const record=boot.sessions.find(s=>s.id===button.dataset.reviewSession);if(record){session=structuredClone(record);page='summary';showSolution=false;render();window.scrollTo(0,0);}}));
 }
 function settings(){
-  shell(`<section class="compact-heading"><div class="eyebrow">ТВІЙ ТЕМП І ТВІЙ ПРОСТІР</div><h1>Налаштування.</h1></section>${durationSettings()}<section class="panel settings-panel"><h2>Щоденне повторення</h2><label class="setting-row"><div><strong>Запускати разом із Windows</strong><p>Програма чекає у треї та рахує час користування ПК.</p></div><input type="checkbox" id="auto-start" ${boot.settings.autoStart?'checked':''}></label><div class="setting-row"><div><strong>Випадковий початок через 1–2 години активності</strong><p>Навчальний день починається о 05:00. Нічна робота без перерви не переривається.</p></div><span class="pill">60–120 ХВ</span></div><div class="setting-row"><div><strong>Кількість вправ у SQL-сесії</strong><p>Після основних вправ можливі до двох додаткових, якщо залишився час. У вправі доступна Luna.</p></div><span class="pill">3 + ДО 2 ВПРАВ</span></div><div class="setting-row"><div><strong>Додаткові вправи за швидке проходження</strong><p>За швидшого проходження додається до двох вправ, насамперед на слабкі вивчені теми.</p></div><select id="min-practice">${[5,7,10,15].map(n=>`<option value="${n}" ${boot.settings.minPracticeMinutes===n?'selected':''}>${n} хвилин</option>`).join('')}</select></div><div class="setting-row"><div><strong>Попередження без перемикання фокуса</strong><p>Справа знизу, без перемикання фокуса. До 16:00 Ctrl+Shift+A відкладає запрошення на 30 хвилин. </p></div>${button('test-warning','Перевірити попередження','secondary')}</div>${button('save-settings','Зберегти налаштування','primary')}</section>${sqlAISettings(boot)}<section class="panel" lang="en"><h2>Evening English</h2><label class="setting-row"><div><strong>Daily English</strong><p>Set the evening invitation time. English stops at a block boundary or after up to three short review tasks.</p></div><input type="checkbox" id="english-enabled" ${boot.settings.englishEnabled?'checked':''}></label><label class="setting-row"><div><strong>Invitation time · Kyiv</strong><p>Practice is optional after 23:00.</p></div><select id="english-hour">${[17,18,19,20,21,22].map(h=>`<option value="${h}" ${(boot.settings.englishStartHour??19)===h?'selected':''}>${h}:00</option>`).join('')}</select></label><div class="button-row">${button('save-english-settings','Save English schedule','primary')}</div><p>You can finish early after 15 active minutes. Speaking has a typed option.</p></section><section class="panel"><h2>Прогрес і файли</h2><p class="muted">Статистика зберігається лише локально:</p><code class="path">${escape(boot.settings.statisticsPath)}</code><div class="button-row">${button('open-course','Відкрити тренажер ↗','secondary')}${button('import-progress','Імпортувати JSON','secondary')}${button('open-statistics','Папка статистики','secondary')}</div><p class="fine-print">PostgreSQL зранку, English увечері. Дані модулів зберігаються окремо в цій папці.</p></section>`);
-  $('track-duration-form')?.addEventListener('submit',event=>{
+  shell(`<section class="compact-heading"><div class="eyebrow">ТВІЙ ТЕМП І ТВІЙ ПРОСТІР</div><h1>Налаштування.</h1></section>${scheduleSettings()}<section class="panel settings-panel"><h2>Щоденне повторення</h2><label class="setting-row"><div><strong>Запускати разом із Windows</strong><p>Програма чекає у треї та рахує час користування ПК.</p></div><input type="checkbox" id="auto-start" ${boot.settings.autoStart?'checked':''}></label><div class="setting-row"><div><strong>Кількість вправ у SQL-сесії</strong><p>Після основних вправ можливі до двох додаткових, якщо залишився час. У вправі доступна Luna.</p></div><span class="pill">3 + ДО 2 ВПРАВ</span></div><div class="setting-row"><div><strong>Додаткові вправи за швидке проходження</strong><p>За швидшого проходження додається до двох вправ, насамперед на слабкі вивчені теми.</p></div><select id="min-practice">${[5,7,10,15].map(n=>`<option value="${n}" ${boot.settings.minPracticeMinutes===n?'selected':''}>${n} хвилин</option>`).join('')}</select></div><div class="setting-row"><div><strong>Попередження без перемикання фокуса</strong><p>Справа знизу, без перемикання фокуса. Ctrl+Shift+A відкладає запрошення SQL або English на 30 хвилин.</p></div>${button('test-warning','Перевірити попередження','secondary')}</div>${button('save-settings','Зберегти налаштування','primary')}</section>${sqlAISettings(boot)}<section class="panel"><h2>Прогрес і файли</h2><p class="muted">Статистика зберігається лише локально:</p><code class="path">${escape(boot.settings.statisticsPath)}</code><div class="button-row">${button('open-course','Відкрити тренажер ↗','secondary')}${button('import-progress','Імпортувати JSON','secondary')}${button('open-statistics','Папка статистики','secondary')}</div></section>`);
+  for(const track of LEARNING_TRACKS){
+    const mode=$<HTMLSelectElement>('schedule-mode-'+track.id)!;
+    mode.addEventListener('change',()=>{
+      const showTime=mode.value==='clock';
+      $('schedule-time-label-'+track.id)!.hidden=!showTime;
+      $<HTMLInputElement>('schedule-time-'+track.id)!.disabled=!showTime;
+    });
+  }
+  $('track-schedule-form')?.addEventListener('submit',event=>{
     event.preventDefault();
-    const durationMinutes:TrackDurations={};
-    for(const track of LEARNING_TRACKS)durationMinutes[track.id]=$<HTMLInputElement>('duration-'+track.id)!.valueAsNumber;
+    const durationMinutes:TrackDurations={},startTimes:TrackStarts={};
+    for(const track of LEARNING_TRACKS){
+      const mode=$<HTMLSelectElement>('schedule-mode-'+track.id)!.value;
+      const clock=$<HTMLInputElement>('schedule-time-'+track.id)!.value;
+      if(mode==='clock'&&!isClockTime(clock))return;
+      startTimes[track.id]=mode==='activity'?'activity':mode==='clock'&&isClockTime(clock)?clock:null;
+      durationMinutes[track.id]=$<HTMLInputElement>('duration-'+track.id)!.valueAsNumber;
+    }
     void action(async()=>{
-      await window.recall.configureDurations(durationMinutes);
+      await window.recall.configureTracks({durationMinutes,startTimes});
       await refresh();
-      notice='Тривалість наступних занять збережено.';
+      notice='Розклад і тривалість збережено.';
       render();
     });
   });
   for(const id of ['sql-ai-save','sql-ai-test','sql-ai-prepare'])$(id)?.addEventListener('click',()=>void action(async()=>{const buttons=['sql-ai-save','sql-ai-test','sql-ai-prepare'].map(k=>$<HTMLButtonElement>(k)!);for(const button of buttons)button.disabled=true;const status=$('sql-ai-status')!;status.textContent=id==='sql-ai-prepare'?'Готуємо новий пакет, екран не блокується…':'Перевіряємо налаштування…';try{const result=await window.recall.sqlAI({action:id==='sql-ai-save'?'settings':id==='sql-ai-test'?'test':'prepare',options:id==='sql-ai-save'?{key:$<HTMLInputElement>('sql-ai-key')!.value,enabled:$<HTMLInputElement>('sql-ai-enabled')!.checked,fallbackEnabled:$<HTMLInputElement>('sql-ai-fallback')!.checked,learningBonus:$<HTMLInputElement>('sql-ai-learning')!.checked}:undefined});await refresh();notice=result.message;render();}finally{for(const button of buttons)button.disabled=false;}}));
   $('test-warning')?.addEventListener('click',()=>void window.recall.previewWarning());
-  $('save-settings')?.addEventListener('click',()=>void action(async()=>{await window.recall.configure({autoStart:$<HTMLInputElement>('auto-start')!.checked,minPracticeMinutes:Number($<HTMLSelectElement>('min-practice')!.value)});await window.recall.englishConfigure({enabled:$<HTMLInputElement>('english-enabled')!.checked,startHour:Number($<HTMLSelectElement>('english-hour')!.value)});await refresh();notice='Налаштування збережено.';render();}));
-  $('save-english-settings')?.addEventListener('click',()=>void action(async()=>{await window.recall.englishConfigure({enabled:$<HTMLInputElement>('english-enabled')!.checked,startHour:Number($<HTMLSelectElement>('english-hour')!.value)});await refresh();notice='English schedule saved.';render();}));
-  bindCourse();bindImport();$('open-statistics')?.addEventListener('click',()=>void window.recall.openStatistics());
+  $('save-settings')?.addEventListener('click',()=>void action(async()=>{await window.recall.configure({autoStart:$<HTMLInputElement>('auto-start')!.checked,minPracticeMinutes:Number($<HTMLSelectElement>('min-practice')!.value)});await refresh();notice='Налаштування збережено.';render();}));
+
 }
 function render(){if(englishScreen){englishScreen.dispose();englishScreen=null;}if(page==='english')englishPage();else if(page==='paused')paused();else if(page==='session')exercise();else if(page==='statistics')statistics();else if(page==='settings')settings();else if(page==='summary')summary();else home();}
 function bindCourse(){$('open-course')?.addEventListener('click',()=>void action(async()=>{notice=(await window.recall.openCourse()).message;render();}));}

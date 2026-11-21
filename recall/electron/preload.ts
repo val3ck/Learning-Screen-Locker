@@ -1,7 +1,7 @@
 import {contextBridge,ipcRenderer} from 'electron';
 import type {DesktopAPI} from '../src/core/contracts';
 const api:DesktopAPI={
-  bootstrap:()=>ipcRenderer.invoke('recall:bootstrap'),trackProgress:()=>ipcRenderer.invoke('recall:track-progress'),configureDurations:durations=>ipcRenderer.invoke('recall:configure-durations',durations),configure:settings=>ipcRenderer.invoke('recall:configure',settings),
+  bootstrap:()=>ipcRenderer.invoke('recall:bootstrap'),trackProgress:()=>ipcRenderer.invoke('recall:track-progress'),configureTracks:settings=>ipcRenderer.invoke('recall:configure-tracks',settings),nodePractice:()=>ipcRenderer.invoke('recall:node-practice'),configure:settings=>ipcRenderer.invoke('recall:configure',settings),
   openCourse:()=>ipcRenderer.invoke('recall:course'),importProgress:()=>ipcRenderer.invoke('recall:import'),
   openStatistics:()=>ipcRenderer.invoke('recall:statistics'),start:mode=>ipcRenderer.invoke('recall:start',mode),
   saveSession:session=>ipcRenderer.invoke('recall:save-session',session),finishSession:session=>ipcRenderer.invoke('recall:finish-session',session),
@@ -10,7 +10,7 @@ const api:DesktopAPI={
   sessionReady:sessionId=>ipcRenderer.invoke('recall:session-ready',sessionId),
   englishStart:(extend,lessonId)=>ipcRenderer.invoke('recall:english-start',extend,lessonId),englishAction:action=>ipcRenderer.invoke('recall:english-action',action),englishFinish:reason=>ipcRenderer.invoke('recall:english-finish',reason),
   englishPauseExtension:()=>ipcRenderer.invoke('recall:english-pause-extension'),
-  englishConfigure:value=>ipcRenderer.invoke('recall:english-configure',value),englishOpen:ruleId=>ipcRenderer.invoke('recall:english-open',ruleId),englishImport:()=>ipcRenderer.invoke('recall:english-import'),
+  englishOpen:ruleId=>ipcRenderer.invoke('recall:english-open',ruleId),englishImport:()=>ipcRenderer.invoke('recall:english-import'),
   englishSaveAudio:(key,bytes,mime)=>ipcRenderer.invoke('recall:english-audio-save',key,bytes,mime),englishLoadAudio:key=>ipcRenderer.invoke('recall:english-audio-load',key),activity:kind=>ipcRenderer.invoke('recall:activity',kind),
   englishSpeech:request=>ipcRenderer.invoke('recall:english-speech',request),
   englishTranslate:request=>ipcRenderer.invoke('recall:english-translate',request),

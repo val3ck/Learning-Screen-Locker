@@ -1,4 +1,5 @@
-import {defaultDuration,minuteMs} from './tracks';
+import {defaultDuration,defaultStart,minuteMs} from './tracks';
+import {clockDue,kyivDayKey,kyivParts,type ClockTime} from './calendar';
 
 export const NIGHT_LIMIT = defaultDuration('nodejs') * minuteMs;
 const SAVE_BUFFER = 5 * 60_000;
@@ -41,17 +42,15 @@ export interface NightDocument {
   runs: NightRun[];
 }
 
-const kyiv = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit',
-  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-});
-
 export function invitationNight(now: Date): string | null {
-  const parts = Object.fromEntries(kyiv.formatToParts(now).map(part => [part.type, part.value]));
-  const minute = Number(parts.hour) * 60 + Number(parts.minute);
-  if (minute >= 22 * 60 + 59) return parts.year + '-' + parts.month + '-' + parts.day;
-  if (minute >= 40) return null;
-  return new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) - 1)).toISOString().slice(0, 10);
+  const parts=kyivParts(now),minute=parts.hour*60+parts.minute;
+  return minute>=22*60+59||minute<40?kyivDayKey(now):null;
+}
+
+export function nodeInvitationDay(now:Date,start:ClockTime|null):string|null {
+  if(start===null)return null;
+  if(start===defaultStart('nodejs'))return invitationNight(now);
+  return clockDue(now,start)?kyivDayKey(now):null;
 }
 
 export function nextNightStep(run: NightRun, course: CourseNight, now: number): NightStep | null {

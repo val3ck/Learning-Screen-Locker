@@ -14,4 +14,9 @@ try{
   assert.equal(preferences.length,1);assert.equal(preferences[0].nodeIntegration,false);assert.equal(preferences[0].contextIsolation,true);assert.equal(preferences[0].sandbox,true);
   assert.equal(await page.evaluate(()=>typeof window.require),'undefined');
   console.log('PASS native desktop startup, tray initialization, secure preload, first-run setup, isolated smoke statistics.');
-}finally{await app.close();}
+}finally{
+  // An isolated smoke process must not hold the release lock if graceful
+  // Electron shutdown stalls after the startup assertions.
+  await app.evaluate(({app})=>{setTimeout(()=>app.exit(0),5000).unref();}).catch(()=>{});
+  await app.close();
+}

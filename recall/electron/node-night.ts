@@ -5,10 +5,11 @@ import { access, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { nightPlan } from '../../nodejs/src/lib/night-plan';
 import { parseProgress } from '../../nodejs/src/lib/progress';
-import { defaultDuration, minuteMs } from '../src/core/tracks';
+import { defaultDuration, defaultStart, minuteMs } from '../src/core/tracks';
+import { isClockTime, kyivDayKey, type ClockTime } from '../src/core/calendar';
 import path from 'node:path';
 import {
-  invitationNight, nextNightStep, reviewNightProgress, validNightDocument,
+  nodeInvitationDay, nextNightStep, reviewNightProgress, validNightDocument,
   type CourseNight, type NightDocument, type NightRun,
 } from '../src/core/node-night';
 import { FocusGuard } from './focus-guard';
@@ -60,6 +61,8 @@ export class NodeNight {
     store: Store; coursePath: string; preloadRoot: string; englishAI: any;
     isolated: boolean; isAvailable: () => boolean; onStatus: () => void; report: (message: string) => void;
     beforeOffer: () => void;
+    canOffer?: () => boolean;
+    scheduledTime?: () => ClockTime|null|undefined;
     shutdown?: () => Promise<void>;
     exerciseGuard?: boolean; testPort?: number; separateApiKey?: string; durationMinutes?: () => number;
   }) {
@@ -67,6 +70,45 @@ export class NodeNight {
     const port = options.testPort;
     this.origin = options.isolated && Number.isInteger(port) && port! > 0 && port! <= 65535
       ? 'http://127.0.0.1:' + port : defaultOrigin;
+  }
+
+  get startTime():ClockTime|null {
+    const configured=this.options.scheduledTime?.();
+    if(configured!==undefined)return configured;
+    const starting=defaultStart('nodejs');
+    return this.document.enabled&&isClockTime(starting)?starting:null;
+  }
+
+  private get canSleep(){
+    const hour=Number(this.startTime?.slice(0,2)??'12');
+    return this.preview||hour>=22||hour<5;
+  }
+
+  async startPractice() {
+    if(this.picking||this.invitation||this.browser||!this.options.isAvailable())throw Error('Інша сесія вже триває.');
+    this.picking=true;
+    try{
+      const health=await this.ensureCourse();
+      if(!health.ready)throw Error('Спочатку відкрий Backend Path у звичному браузері та дочекайся синхронізації.');
+      const course=await this.readCourse();
+      if(!course.candidate)throw Error('Усі доступні уроки завершені. Відкрий Backend Path для повторення.');
+      if(!this.options.isAvailable())throw Error('Інша сесія вже триває.');
+      this.course=course;
+      this.preview=false;
+      this.promptNight=kyivDayKey(new Date());
+      this.options.beforeOffer();
+      this.openStudy(course.candidate.lessonId);
+    }finally{this.picking=false;}
+  }
+
+  async scheduleChanged() {
+    this.setupProbeAt=0;
+    if(this.preview||this.picking||!this.invitation)return;
+    this.closeInvitation();
+    if(!this.document.choice){
+      this.document.offeredNight=undefined;
+      await this.save();
+    }
   }
 
   private get durationMinutes(){return this.options.durationMinutes?.()??defaultDuration('nodejs');}
@@ -89,7 +131,7 @@ export class NodeNight {
   }
 
   get protected() { return this.guard.active; }
-  get busy() { return !!this.invitation && !this.preview || !!this.browser && ['loading','learning','editor'].includes(this.phase); }
+  get busy() { return this.picking||!!this.invitation && !this.preview || !!this.browser && ['loading','learning','editor'].includes(this.phase); }
   get canResume() { return !!this.browser && !this.browser.isDestroyed(); }
 
   async init() {
@@ -151,7 +193,7 @@ export class NodeNight {
   async tick(now: Date, active: boolean) {
     if (this.running) this.applyDeadline(now.getTime());
     if (this.checking) return;
-    const night = invitationNight(now);
+    const start=this.startTime,night=nodeInvitationDay(now,start);
     if (this.invitation && !this.preview && night !== this.promptNight && !this.picking) this.closeInvitation();
     this.checking = true;
     try {
@@ -159,17 +201,18 @@ export class NodeNight {
         this.stateProbeAt = now.getTime() + 2500;
         await this.refresh();
       }
-      if (this.options.isolated || !this.document.enabled || this.busy || this.browser || !night ||
-          !active || !this.options.isAvailable() || night === this.document.offeredNight || now.getTime() < this.setupProbeAt) return;
+      if (this.options.isolated || this.busy || this.browser || !night ||
+          !active || !this.options.isAvailable() || this.options.canOffer?.()===false || night===this.document.offeredNight || this.document.runs.some(run=>run.night===night) || now.getTime() < this.setupProbeAt) return;
       this.setupProbeAt = now.getTime() + 30_000;
+      const canOffer=()=>this.startTime===start&&nodeInvitationDay(new Date(),start)===night&&this.options.isAvailable()&&this.options.canOffer?.()!==false;
       const status = await this.ensureCourse();
-      if (!status.ready || !this.options.isAvailable() || invitationNight(new Date()) !== night) return;
+      if (!status.ready || !canOffer()) return;
       const course = await this.readCourse();
-      if (!course.candidate || !this.options.isAvailable() || invitationNight(new Date()) !== night) return;
+      if (!course.candidate || !canOffer()) return;
       this.document.offeredNight = night;
       this.document.choice = undefined;
       await this.save();
-      if (!this.options.isAvailable()) {
+      if (!canOffer()) {
         this.document.offeredNight = undefined;
         await this.save();
         return;
@@ -237,7 +280,8 @@ export class NodeNight {
   private async select(choice: Choice) {
     if (this.picking) return;
     if (!this.preview && !this.options.isAvailable()) throw Error('Інша сесія вже почалася.');
-    if (!this.preview && invitationNight(new Date()) !== this.promptNight) { this.closeInvitation(); return; }
+    if (!this.preview && nodeInvitationDay(new Date(),this.startTime) !== this.promptNight) { this.closeInvitation(); return; }
+    if(choice==='sleep'&&!this.canSleep)throw Error('Для цього запрошення доступна дія «Пропустити».');
     this.picking = true;
     try {
       if (!this.preview) { this.document.choice = choice; await this.save(); }
@@ -492,7 +536,7 @@ export class NodeNight {
   }
 
   private installHandlers() {
-    const state = () => ({ durationMinutes:this.durationMinutes, enabled: this.document.enabled, demo: this.preview || this.options.isolated, ...this.ai.settings() });
+    const state = () => ({ durationMinutes:this.durationMinutes, canSleep:this.canSleep, demo: this.preview || this.options.isolated, ...this.ai.settings() });
     ipcMain.handle('recall:node-control-state', event => {
       this.control(event, event.sender === this.settingsWindow?.webContents); return state();
     });
@@ -503,12 +547,9 @@ export class NodeNight {
     });
     ipcMain.handle('recall:node-config', async (event, value) => {
       this.control(event, true);
-      if (!value || typeof value.enabled !== 'boolean' || typeof value.shared !== 'boolean' ||
+      if (!value || typeof value.shared !== 'boolean' ||
           typeof value.key !== 'string' || value.key.length > 500) throw Error('Некоректні налаштування.');
       await this.ai.configure(value.key, value.shared);
-      this.document.enabled = value.enabled;
-      if (!value.enabled && !this.preview) this.closeInvitation();
-      await this.save();
       return state();
     });
     ipcMain.handle('recall:node-open-course', async event => {

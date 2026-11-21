@@ -113,7 +113,7 @@ async function release(){
     await ensureDependencies(npm);
     await run([npm,'run','build']);
     await run([path.join(modules,'tsx','dist','cli.mjs'),'--test','--test-concurrency=1',
-      'tests/core.test.ts','tests/daily-focus.test.ts','tests/english*.test.ts','tests/learning-duration.test.ts',
+      'tests/core.test.ts','tests/daily-focus.test.ts','tests/english*.test.ts','tests/learning-duration.test.ts','tests/track-clock.test.ts',
       'tests/local-release.test.ts','tests/node-night.test.ts','tests/progress.test.ts','tests/storage.test.ts',
     ]);
     directory=await mkdtemp(path.join(root,localPrefix));

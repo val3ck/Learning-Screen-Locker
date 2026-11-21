@@ -1,4 +1,4 @@
-import type {TrackDurations,TrackProgress} from './tracks';
+import type {TrackDurations,TrackProgress,TrackStarts,TrackStart,TrackId} from './tracks';
 export interface Topic {id:string; title:string; chapter:number; prerequisites:string[]}
 export interface Progress {version:1; moduleId:string; catalogVersion:string; confirmedTopicIds:string[]; practiceTopicIds:string[]; completedSourceIds:string[]; syncedAt:string}
 export interface DataTable {name:string; columns:{name:string; type:string}[]; rows:Record<string,unknown>[]}
@@ -32,7 +32,7 @@ export interface LearningModule {
   presentation:{language:string; answerLabel:string; contextLabel:string};
 }
 export interface ModuleState {version:1; moduleId:string; progress:Progress|null; history:Record<string,TopicHistory>; learnedTopicIds?:string[]}
-export interface Settings {version:1; setupComplete:boolean; autoStart:boolean; statisticsPath:string; coursePath:string; activeModuleId:string; minPracticeMinutes:number; durationMinutes?:TrackDurations; dailyEnabledAfterDay:string; englishEnabled?:boolean;englishEnabledAfterDay?:string;englishStartHour?:number;englishCoursePath?:string;sqlAIEnabled?:boolean;sqlLearningBonus?:boolean;sqlAIFallback?:boolean}
+export interface Settings {version:1; setupComplete:boolean; autoStart:boolean; statisticsPath:string; coursePath:string; activeModuleId:string; minPracticeMinutes:number; durationMinutes?:TrackDurations; startTimes?:TrackStarts; dailyEnabledAfterDay:string; englishEnabled?:boolean;englishEnabledAfterDay?:string;englishStartHour?:number;englishCoursePath?:string;sqlAIEnabled?:boolean;sqlLearningBonus?:boolean;sqlAIFallback?:boolean}
 export interface ScheduleState {version:1; dayKey:string; eligible:boolean; delayMs:number; activeMs:number; warned:boolean; triggered:boolean; finished:boolean; lastTick:number; snoozedUntil?:number; warningRemainingMs?:number}
 export interface WarningStatus {remainingSeconds:number; shortcutAvailable:boolean; pausedSession:boolean}
 export interface SQLAIStatus {enabled:boolean;lunaConfigured:boolean;fallbackEnabled:boolean;fallbackConfigured:boolean;cached:number;busy:boolean;message:string}
@@ -40,11 +40,12 @@ export const SQL_CHAT_LIMIT = 5;
 export const SQL_CHAT_QUESTION_LIMIT = 1200;
 export interface SQLChatRequest {sessionId:string;taskId:string;question:string;feedback?:string}
 export interface SQLChatReply {answer:string;model:string;provider:string}
-export interface Bootstrap {settings:Settings; tracks:TrackProgress; module:ModuleState; sessions:SessionRecord[]; schedule:ScheduleState; demo:boolean; recoveryMessages:string[]; activeSession:SessionRecord|null; shortcutAvailable:boolean;english?:import('../modules/english/types').EnglishView;activeLearningSession?:import('./learning').LearningEnvelope|null;sqlAI?:SQLAIStatus}
+export interface Bootstrap {settings:Settings; tracks:TrackProgress; startTimes:Record<TrackId,TrackStart>; module:ModuleState; sessions:SessionRecord[]; schedule:ScheduleState; demo:boolean; recoveryMessages:string[]; activeSession:SessionRecord|null; shortcutAvailable:boolean;english?:import('../modules/english/types').EnglishView;activeLearningSession?:import('./learning').LearningEnvelope|null;sqlAI?:SQLAIStatus}
 export interface DesktopAPI {
   bootstrap():Promise<Bootstrap>;
   configure(settings:{autoStart:boolean;minPracticeMinutes?:number}):Promise<void>;
-  configureDurations(durations:TrackDurations):Promise<void>;
+  configureTracks(settings:{durationMinutes:TrackDurations;startTimes:TrackStarts}):Promise<void>;
+  nodePractice():Promise<void>;
   trackProgress():Promise<TrackProgress>;
   openCourse():Promise<{ok:boolean; message:string}>;
   importProgress():Promise<{ok:boolean; message:string}>;
@@ -62,7 +63,6 @@ export interface DesktopAPI {
   englishPauseExtension():Promise<import('../modules/english/types').EnglishView>;
   englishAction(action:import('./learning').LearningAction):Promise<import('../modules/english/types').EnglishView>;
   englishFinish(reason:'surrendered'|'completed'):Promise<import('../modules/english/types').EnglishView>;
-  englishConfigure(settings:{enabled:boolean;startHour:number}):Promise<void>;
   englishOpen(ruleId?:string):Promise<{ok:boolean;message:string}>;
   englishImport():Promise<{ok:boolean;message:string}>;
   englishSaveAudio(key:string,bytes:number[],mime:string):Promise<string>;
