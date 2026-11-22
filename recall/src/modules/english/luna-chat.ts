@@ -22,7 +22,7 @@ export class EnglishLunaChat {
     this.widget=document.createElement('div');
     this.widget.className='sql-chat-widget en-luna-widget';
     this.widget.hidden=true;
-    this.widget.innerHTML=`<button type="button" class="sql-chat-launcher" aria-expanded="false" aria-controls="en-luna-panel">Luna</button>
+    this.widget.innerHTML=`<button type="button" class="sql-chat-launcher" aria-expanded="false" aria-controls="en-luna-panel"><span class="en-luna-moon" aria-hidden="true">🌚</span> Luna</button>
       <section class="sql-chat" id="en-luna-panel" aria-labelledby="en-luna-title" hidden>
         <header class="sql-chat-header en-luna-header">
           <div class="en-luna-header-row"><h2 id="en-luna-title">Luna <span>Task help</span></h2><button type="button" class="sql-chat-close" aria-label="Close Luna chat">×</button></div>
@@ -74,7 +74,7 @@ export class EnglishLunaChat {
 
   sync(view:EnglishView) {
     const run=view.run,attempt=view.attempt;
-    const active=run?.status==='active'&&!run.endedAt&&!view.readonly;
+    const active=run?.status==='active'&&!run.endedAt&&run.payload.pauseUntil===undefined&&!view.readonly;
     const area=run?.payload.phase==='reinforcement'?'practice':run?.payload.phase==='lesson'&&attempt?view.lesson.blocks[attempt.blockIndex]?.id:'';
     this.widget.hidden=!active||!area||area==='summary';
     if(this.widget.hidden)return;

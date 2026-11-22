@@ -145,6 +145,15 @@
 .en-topic-connection { margin: 10px 0 20px; padding: 12px 16px; border-inline-start: 3px solid #7d966b; background: #f0f4e9; }
 .en-luna-widget[hidden] { display: none; }
 .en-luna-widget { z-index: 30; }
+.en-luna-moon { display:inline-block; font-size:1.12em; margin-inline-end:3px; }
+.en-luna-widget .sql-chat-launcher:hover .en-luna-moon { transform:rotate(-14deg); }
+@media(prefers-reduced-motion:no-preference){.en-luna-moon { transition:transform 160ms ease; }}
+.en-heading-actions { display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+.en-heading-actions .button { white-space:nowrap; }
+.en-break-screen { display:grid; min-height:65vh; place-items:center; }
+.en-break-screen .en-break { width:min(100%,460px); box-sizing:border-box; padding:clamp(22px,4vw,48px); text-align:center; }
+.en-break-screen h1 { margin-top:0; }
+.en-break-screen #en-timed-break-clock { font-variant-numeric:tabular-nums; font-size:clamp(36px,7vw,62px); }
 .en-luna-widget select { display: block; width: 100%; margin-bottom: 8px; padding: 8px 10px; border: 1px solid #b4c3b3; border-radius: 7px; background: #fcfdf9; color: inherit; font: inherit; }
 .en-luna-header { display: block; }
 .en-luna-header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }

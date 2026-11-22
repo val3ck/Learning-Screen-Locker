@@ -31,6 +31,7 @@ export function validateEnglishDocument(value:unknown):EnglishDocument {
   for(const {payload:p} of d.runs){
     if(p.overtimeBlock!==undefined&&(!Number.isInteger(p.overtimeBlock)||p.overtimeBlock<0||p.overtimeBlock>7||p.phase!=='lesson'))throw Error('Invalid final English block.');
     if(p.revisit!==undefined&&p.revisit!==true)throw Error('Invalid English review state.');
+    if(p.pauseUntil!==undefined&&(!Number.isSafeInteger(p.pauseUntil)||p.pauseUntil<=0))throw Error('Invalid English pause deadline.');
   }
   if(d.activeRunId!==null&&!d.runs.some(r=>r.id===d.activeRunId))throw new Error('No active English session was found.');
   for(const run of d.runs)if(run.payload.extraPractice!==undefined&&(run.payload.extraPractice!==true||run.activeMs>ENGLISH_EXTENSION_MS||run.mode==='daily'||run.payload.phase==='break'))throw new Error('Invalid English extra practice state.');
@@ -153,7 +154,39 @@ export class EnglishController implements LearningController {
     if(this.snapshot()?.payload.phase==='lesson')this.engine.pause(false);else this.ensurePractice();
     this.changed();
   }
-  pause(){const run=this.snapshot();if(run&&!run.endedAt){run.status='paused';if(this.current())this.engine.pause(true);this.changed();}}
+  pause(until?:number){
+    const run=this.snapshot();
+    if(!run||run.endedAt)return;
+    run.status='paused';
+    if(until===undefined)delete run.payload.pauseUntil;else run.payload.pauseUntil=until;
+    if(this.current())this.engine.pause(true);
+    this.changed();
+  }
+  timedPause(){
+    const run=this.snapshot();
+    const until=run?.payload.pauseUntil;
+    if(!run||until===undefined||run.status!=='paused'||run.endedAt||run.dayKey!==kyivDayKey(this.now()))return null;
+    if(run.payload.phase!=='reinforcement'&&this.current()?.lessonId!==run.payload.lessonId)return null;
+    return {runId:run.id,until};
+  }
+  resumeTimedPause(expectedRunId?:string){
+    const pause=this.timedPause();
+    if(!pause||(expectedRunId!==undefined&&pause.runId!==expectedRunId))return false;
+    const run=this.snapshot()!;
+    run.status='active';
+    delete run.payload.pauseUntil;
+    if(run.payload.phase==='lesson')this.engine.pause(false);
+    this.changed();
+    return true;
+  }
+  setInPlaceBreak(until?:number){
+    const run=this.snapshot();
+    if(!run||run.endedAt||run.status!=='active')throw Error('English is not active.');
+    if(until===undefined)delete run.payload.pauseUntil;
+    else if(run.payload.pauseUntil===undefined)run.payload.pauseUntil=until;
+    else return;
+    this.changed();
+  }
   private question(key:string):EnglishChoice|null {const s=this.current();if(!s)return null;const match=/^(reading|listening|grammar)-(\d+)$/.exec(key);if(!match)return null;const index=Number(match[2]);return match[1]==='grammar'?s.lesson.grammar.exercises[index]||null:s.lesson[match[1] as 'reading'|'listening'].questions[index]||null;}
   exitQuestions(){const s=this.current();if(!s||s.lesson.productionMode==='ai-opinion-v1')return [];return [...s.lesson.vocabulary.slice(3).map((v,i)=>{const task=(Learning as any).wordTask(v);return {key:`exit-${i}`,prompt:`${task.prompt}\nClue: ${task.clue}\nType ONE word or phrase.`,kind:'word' as const,answer:v.en};}),...s.lesson.grammar.exercises.slice(0,2).map((q,i)=>{const options=[...q.options.slice(1),q.options[0]];return {key:`exit-${i+3}`,prompt:q.prompt,kind:'choice' as const,answer:q.options[q.correct],options,correct:options.indexOf(q.options[q.correct])};})];}
   languageTarget(key:string,attemptId?:string){
@@ -260,6 +293,10 @@ export class EnglishController implements LearningController {
   tick(milliseconds:number,activity:ActivityState){
     const run=this.snapshot();if(!run||run.endedAt||run.status!=='active')return;
     if(run.dayKey!==kyivDayKey(this.now())){this.closeRun(run,'partial');this.changed();return;}
+    if(run.payload.pauseUntil!==undefined){
+      if(this.now().getTime()>=run.payload.pauseUntil)this.setInPlaceBreak();
+      return;
+    }
     if(!activity.active||activity.waiting)return;
     const delta=Math.max(0,Math.min(milliseconds,5000));if(!delta)return;
     if(run.payload.phase==='break'){run.payload.breakRemainingMs=Math.max(0,run.payload.breakRemainingMs-delta);if(!run.payload.breakRemainingMs){run.payload.phase='lesson';this.engine.pause(false);this.reachBoundary();}this.changed();return;}

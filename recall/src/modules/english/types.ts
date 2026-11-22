@@ -32,11 +32,13 @@ export interface EnglishAttempt {
 }
 export interface EnglishCourseState {version:1;contentVersion:string;createdAt:string;activeSession:EnglishAttempt|null;sessions:EnglishAttempt[];reviews:Record<string,EnglishReview>;completedDays:string[];xp:number;legacy:Record<string,unknown>;familiarWords:{id:string;verified:false}[];settings:{reminderTime:string;reminderEnabled:boolean};migration:unknown}
 export interface EnglishPractice {aiAssessment?:any;id:string;kind:'word'|'choice'|'production'|'sentence';prompt:string;answer:string;explanation:string;options?:string[];correct?:number;result?:EnglishResult;value:string;revealed:boolean;attempts:number;instruction?:string;clue?:string;hint?:string;example?:string;wordBank?:string[];wordId?:string;presentationVersion?:number;reference?:{label:string;text:string;status:string};previousAnswers?:string[]}
-export interface EnglishRunPayload {phase:'lesson'|'break'|'reinforcement';lessonId:string;breakRemainingMs:number;breakUsed:boolean;practiceIndex:number;practice:EnglishPractice|null;practiceHistory?:EnglishPractice[];extraPractice?:true;revisit?:true;overtimeBlock?:number}
+export interface EnglishRunPayload {phase:'lesson'|'break'|'reinforcement';lessonId:string;pauseUntil?:number;breakRemainingMs:number;breakUsed:boolean;practiceIndex:number;practice:EnglishPractice|null;practiceHistory?:EnglishPractice[];extraPractice?:true;revisit?:true;overtimeBlock?:number}
 export interface EnglishDay {activeMs:number;targetMinutes?:number;dismissed:boolean;fulfilled:boolean;learningComplete:boolean}
 export interface EnglishDocument {version:2;revision:number;course:EnglishCourseState;days:Record<string,EnglishDay>;runs:LearningEnvelope<EnglishRunPayload>[];activeRunId:string|null;lease?:{owner:string;expiresAt:number};importedAt?:string;parkedAttempts?:EnglishAttempt[];primaryAttemptId?:string}
 export interface EnglishView {
  targetMs:number;
+ pauseMinutes?:number;
+ timedPauseUntil?:number;
  aiSettings?:any;
  reviewGroups?:{id:string;title:string;rule:string;count:number;total:number;maintained:boolean;evidence:{episodeId:string;original:string;replacement:string}[]}[];
  reviewGroupMessage?:string;

@@ -1,4 +1,4 @@
-import {defaultDuration} from '../src/core/tracks';
+import {defaultDuration,DEFAULT_ENGLISH_PAUSE_MINUTES} from '../src/core/tracks';
 import path from 'node:path';
 import Repository from '../integration/english-repository.cjs';
 import Bridge from '../integration/english-bridge.cjs';
@@ -8,18 +8,24 @@ import type {LearningAction,LearningOutcome} from '../src/core/learning';
 import {kyivDayKey} from '../src/core/calendar';
 export class EnglishHost {
   readonly repository:any;controller:EnglishController;recoveryError:string|null=null;private baseRevision=0;private dirty=false;private lastSave=0;private leaseAt=0;private owned=false;private saveTimer:ReturnType<typeof setTimeout>|null=null;
-  constructor(root:string,private now:()=>Date=()=>new Date(),private targetMinutes=()=>defaultDuration('english')){
+  constructor(root:string,private now:()=>Date=()=>new Date(),private targetMinutes=()=>defaultDuration('english'),private pauseMinutes=()=>DEFAULT_ENGLISH_PAUSE_MINUTES){
     this.repository=new Repository.EnglishRepository(path.join(root,'modules','english'),{validate:validateEnglishDocument,createDefault:()=>newEnglishDocument(this.now()),now:()=>this.now().getTime()});
     let data:EnglishDocument;try{data=this.repository.read();if(data.course.activeSession&&data.course.activeSession.choicePresentationVersion!==2)this.repository.backup(data,'before-choices-v2');}catch(error){this.recoveryError=String(error);data=newEnglishDocument(this.now());}this.baseRevision=data.revision;this.controller=new EnglishController(data,this.now,this.targetMinutes);
   }
   readonly(){return !!this.recoveryError||this.repository.readonly('desktop');}
   refresh(){if(this.recoveryError||this.running())return;const data=this.repository.read() as EnglishDocument;if(data.revision!==this.baseRevision){this.baseRevision=data.revision;this.controller=new EnglishController(data,this.now,this.targetMinutes);}}
   running(){const run=this.controller.snapshot();return this.owned&&!!run&&run.status==='active'&&!run.endedAt;}
-  view(){this.refresh();return {...this.controller.view(this.readonly()),message:this.recoveryError||(typeof this.controller.document.course.activeSession?.learningUpgradeNotice==='string'?this.controller.document.course.activeSession.learningUpgradeNotice:undefined)};}
-  start(mode:'daily'|'practice'|'demo'='practice',extend=false,lessonId?:string){
+  view(){this.refresh();return {...this.controller.view(this.readonly()),pauseMinutes:this.pauseMinutes(),timedPauseUntil:this.controller.timedPause()?.until,message:this.recoveryError||(typeof this.controller.document.course.activeSession?.learningUpgradeNotice==='string'?this.controller.document.course.activeSession.learningUpgradeNotice:undefined)};}
+  start(mode:'daily'|'practice'|'demo'='practice',extend=false,lessonId?:string,resumeRunId?:string){
     if(this.recoveryError)throw new Error(this.recoveryError);
     const data=this.repository.acquire('desktop') as EnglishDocument;this.baseRevision=data.revision;this.controller=new EnglishController(data,this.now,this.targetMinutes);
-    try{if(lessonId)this.controller.startSavedLesson(lessonId,mode==='demo'?'demo':'practice');else if(extend)this.controller.startExtension(mode==='demo'?'demo':'practice');else this.controller.start(mode);}catch(error){this.repository.release('desktop');throw error;}
+    try{
+      if(resumeRunId!==undefined){
+        if(!this.controller.resumeTimedPause(resumeRunId)){this.repository.release('desktop');return;}
+      }else if(lessonId)this.controller.startSavedLesson(lessonId,mode==='demo'?'demo':'practice');
+      else if(extend)this.controller.startExtension(mode==='demo'?'demo':'practice');
+      else if(!this.controller.resumeTimedPause())this.controller.start(mode);
+    }catch(error){this.repository.release('desktop');throw error;}
     this.owned=this.controller.snapshot()?.status==='active';this.dirty=true;this.save();
   }
   action(action:LearningAction){if(this.readonly())throw new Error('English is open in your browser. Pause the lesson there to continue here.');this.controller.dispatch(action);this.dirty=true;if(action.type==='answer'){if(this.saveTimer)clearTimeout(this.saveTimer);this.saveTimer=setTimeout(()=>{this.saveTimer=null;try{this.save();}catch(error){this.recoveryError=String(error);}},400);}else this.save();return this.view();}
@@ -28,7 +34,12 @@ export class EnglishHost {
   tick(ms:number,active:boolean){if(!this.running())return;this.controller.tick(ms,{active});this.dirty=true;if(this.now().getTime()-this.lastSave>=10000)this.save();if(this.now().getTime()-this.leaseAt>15000){this.repository.renew('desktop');this.leaseAt=this.now().getTime();}}
   save(){if(this.saveTimer)clearTimeout(this.saveTimer);this.saveTimer=null;if(!this.dirty)return;const next=this.repository.write(this.controller.document,this.baseRevision,'desktop') as EnglishDocument;this.baseRevision=next.revision;this.controller.document.revision=next.revision;this.dirty=false;this.lastSave=this.now().getTime();}
   finish(reason:LearningOutcome){this.controller.finish(reason);this.dirty=true;this.save();this.owned=false;this.repository.release('desktop');}
-  pause(){if(this.running()){this.controller.pause();this.dirty=true;this.save();}this.owned=false;this.repository.release('desktop');}
+  pause(until?:number){if(this.running()){this.controller.pause(until);this.dirty=true;this.save();}this.owned=false;this.repository.release('desktop');}
+  setInPlaceBreak(until?:number){
+    if(!this.running())throw Error('English is not active.');
+    this.controller.setInPlaceBreak(until);
+    this.dirty=true;this.save();return this.view();
+  }
   release(){this.save();this.owned=false;this.repository.release('desktop');}
   recover(){const run=this.controller.snapshot();if(run&&run.status==='active'&&!run.endedAt&&!this.readonly()){if(run.payload.extraPractice)this.controller.pause();else this.controller.finish('interrupted');this.dirty=true;this.save();this.repository.release('desktop');}}
   import(source:unknown){if(this.recoveryError){const repaired=this.repository.repair(importEnglishCourse(source,this.now(),this.targetMinutes()));this.recoveryError=null;this.baseRevision=repaired.revision;this.controller=new EnglishController(repaired,this.now,this.targetMinutes);return;}this.refresh();if(this.readonly()||this.running())throw new Error('Pause the active English lesson first.');this.repository.acquire('desktop');try{this.repository.backup(this.controller.document,'before-import');const imported=importEnglishCourse(source,this.now(),this.targetMinutes());

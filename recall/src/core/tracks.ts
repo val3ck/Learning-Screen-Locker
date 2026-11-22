@@ -61,3 +61,11 @@ export function validStarts(value:unknown):value is TrackStarts {
   });
 }
 export const minuteMs=60_000;
+export const DEFAULT_ENGLISH_PAUSE_MINUTES=10;
+export const MAX_ENGLISH_PAUSE_MINUTES=60;
+export function validEnglishPauseMinutes(value:unknown):value is number {
+  return typeof value==='number'&&Number.isInteger(value)&&value>=1&&value<=MAX_ENGLISH_PAUSE_MINUTES;
+}
+export function englishPauseMinutes(value:unknown){
+  return validEnglishPauseMinutes(value)?value:DEFAULT_ENGLISH_PAUSE_MINUTES;
+}

@@ -33,7 +33,7 @@ export interface LearningModule {
   presentation:{language:string; answerLabel:string; contextLabel:string};
 }
 export interface ModuleState {version:1; moduleId:string; progress:Progress|null; history:Record<string,TopicHistory>; learnedTopicIds?:string[]}
-export interface Settings {version:1; setupComplete:boolean; autoStart:boolean; statisticsPath:string; coursePath:string; activeModuleId:string; minPracticeMinutes:number; durationMinutes?:TrackDurations; startTimes?:TrackStarts; lunaModels?:Partial<Record<TrackId,LunaModel>>; tutorLunaPreferences?:Partial<Record<'git'|'vim',LunaPreferences>>; dailyEnabledAfterDay:string; englishEnabled?:boolean;englishEnabledAfterDay?:string;englishStartHour?:number;englishCoursePath?:string;sqlAIEnabled?:boolean;sqlLearningBonus?:boolean;sqlAIFallback?:boolean;sqlWarnAfter16?:boolean}
+export interface Settings {version:1; setupComplete:boolean; autoStart:boolean; statisticsPath:string; coursePath:string; activeModuleId:string; minPracticeMinutes:number; durationMinutes?:TrackDurations; startTimes?:TrackStarts; lunaModels?:Partial<Record<TrackId,LunaModel>>; tutorLunaPreferences?:Partial<Record<'git'|'vim',LunaPreferences>>; dailyEnabledAfterDay:string; englishEnabled?:boolean;englishPauseMinutes?:number;englishEnabledAfterDay?:string;englishStartHour?:number;englishCoursePath?:string;sqlAIEnabled?:boolean;sqlLearningBonus?:boolean;sqlAIFallback?:boolean;sqlWarnAfter16?:boolean}
 export interface ScheduleState {version:1; dayKey:string; eligible:boolean; delayMs:number; activeMs:number; warned:boolean; triggered:boolean; finished:boolean; lastTick:number; snoozedUntil?:number; warningRemainingMs?:number}
 export interface WarningStatus {remainingSeconds:number; shortcutAvailable:boolean; pausedSession:boolean}
 export interface SQLAIStatus {enabled:boolean;lunaConfigured:boolean;fallbackEnabled:boolean;fallbackConfigured:boolean;cached:number;busy:boolean;message:string}
@@ -48,7 +48,7 @@ export interface DesktopAPI {
   bootstrap():Promise<Bootstrap>;
   configure(settings:{autoStart:boolean;minPracticeMinutes?:number;sqlWarnAfter16?:boolean}):Promise<void>;
   configureLunaModels(models:Partial<Record<TrackId,LunaModel>>):Promise<void>;
-  configureTracks(settings:{durationMinutes:TrackDurations;startTimes:TrackStarts}):Promise<void>;
+  configureTracks(settings:{durationMinutes:TrackDurations;startTimes:TrackStarts;englishPauseMinutes?:number}):Promise<void>;
   nodePractice():Promise<void>;
   browserPractice(id:'git'|'vim'):Promise<void>;
   trackProgress():Promise<TrackProgress>;
@@ -66,6 +66,7 @@ export interface DesktopAPI {
   sessionReady(sessionId:string):Promise<void>;
   englishStart(extend?:boolean,lessonId?:string):Promise<import('../modules/english/types').EnglishView>;
   englishPauseExtension():Promise<import('../modules/english/types').EnglishView>;
+  englishInPlaceBreak(resume:boolean):Promise<import('../modules/english/types').EnglishView>;
   englishAction(action:import('./learning').LearningAction):Promise<import('../modules/english/types').EnglishView>;
   englishFinish(reason:'surrendered'|'completed'):Promise<import('../modules/english/types').EnglishView>;
   englishOpen(ruleId?:string):Promise<{ok:boolean;message:string}>;

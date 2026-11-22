@@ -10,7 +10,7 @@ let englishScreen:EnglishScreen|null=null;
 import type {Bootstrap,SessionRecord,ExecutionResult,DataTable,Runner} from './core/contracts';
 import {getModule} from './modules/registry';
 import {isClockTime} from './core/calendar';
-import {defaultStart,LEARNING_TRACKS,minuteMs,trackDuration,type TrackId,type TrackDurations,type TrackStart,type TrackStarts} from './core/tracks';
+import {defaultStart,englishPauseMinutes,LEARNING_TRACKS,MAX_ENGLISH_PAUSE_MINUTES,minuteMs,trackDuration,type TrackId,type TrackDurations,type TrackStart,type TrackStarts} from './core/tracks';
 import {recordAttempt,canSurrender,sqlDuration,surrenderMessage,availableTopicIds} from './core/session';
 const root=document.querySelector<HTMLDivElement>('#app')!;
 const sqlChat=new SQLChatView((sessionId,taskId)=>{
@@ -74,6 +74,7 @@ function scheduleSettings(){
         <small>${track.durationHelp}</small>
       </fieldset>`;
     }).join('')}
+    <label class="setting-row"><div><strong>Пауза English</strong><p>На цей час навчальний таймер зупиняється. Повернутися до вправи можна раніше.</p></div><span class="duration-input"><input id="english-pause-minutes" type="number" min="1" max="${MAX_ENGLISH_PAUSE_MINUTES}" required value="${englishPauseMinutes(boot.settings.englishPauseMinutes)}" aria-label="Пауза English · хвилини"><span>хв</span></span></label>
     <button class="button primary" type="submit">Зберегти розклад</button>
   </form></section>`;
 }
@@ -256,7 +257,7 @@ function settings(){
       durationMinutes[track.id]=$<HTMLInputElement>('duration-'+track.id)!.valueAsNumber;
     }
     void action(async()=>{
-      await window.recall.configureTracks({durationMinutes,startTimes});
+      await window.recall.configureTracks({durationMinutes,startTimes,englishPauseMinutes:$<HTMLInputElement>('english-pause-minutes')!.valueAsNumber});
       await refresh();
       notice='Розклад і тривалість збережено.';
       render();
