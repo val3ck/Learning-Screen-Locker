@@ -212,7 +212,7 @@ export function createCourseBridge(
       const url = new URL(req.url!, origin);
       const action = url.pathname.slice(prefix.length);
       if (req.method === 'GET') {
-        if (action === 'health') { send(200, { app: 'backend-path', protocol: 1, ready: !!read().progress }); return; }
+        if (action === 'health') { send(200, { app: 'backend-path', protocol: 1, lessonGoal: 1, ready: !!read().progress }); return; }
         if (action === 'progress') { send(200, read()); return; }
         if (action === 'night') {
           const progress = read().progress;

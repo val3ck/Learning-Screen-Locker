@@ -70,3 +70,7 @@
 @keyframes materialize{from{opacity:0;filter:blur(1px);translate:0 2px}to{opacity:1;filter:blur(0);translate:0 0}}
 @keyframes goal-arrival{from{opacity:0;scale:.65}to{opacity:1;scale:1}}
 @media(prefers-reduced-motion:reduce){.editor,.dialogue,.coordinate-pointer,.terminal-footer,.burger{transition:none!important}.materialize,.target{animation:none!important}}
+
+.recall-vim-session{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;padding:8px 0;border-block:1px solid #314238;font-size:.8rem}
+.recall-vim-session time{margin-inline-start:4px;font-variant-numeric:tabular-nums;color:#c4dbb1}
+#recall-vim-status:not(:empty){flex-basis:100%;color:#e8be92}

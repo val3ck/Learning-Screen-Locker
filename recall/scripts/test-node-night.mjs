@@ -69,7 +69,7 @@ try {
   assert.equal(tracks.nodejs.done,0);assert.ok(tracks.nodejs.total>0);
   assert.equal(await dashboard.locator('#sidebar-tracks li').count(),5);
   await dashboard.locator('#nav-settings').click();
-  for(const [id,minutes] of Object.entries({postgresql:'15',english:'55',nodejs:'40'})){
+  for(const [id,minutes] of Object.entries({postgresql:'15',english:'55',nodejs:'60'})){
     assert.equal(await dashboard.locator('#duration-'+id).inputValue(),minutes);
   }
   await dashboard.locator('#duration-nodejs').fill('30');
@@ -136,7 +136,6 @@ try {
   console.log('PASS Node.js Luna side reply, clear, adjustable context and concise toggle.');
   await lunaLauncher.click();
   await study.getByRole('button',{name:'Переходжу до практики'}).click();
-  await study.getByRole('button',{name:/Ще один крок/}).click();
   await study.getByRole('button',{name:'Практика в редакторі',exact:true}).click();
   await waitFor(async()=>(await counts()).covers===0,'editor exit removed covers');
   assert.equal((await counts()).locked,false);
@@ -170,7 +169,11 @@ try {
   const manual=await findWindow(origin+'/#/lesson/setup-tools');
   await manual.locator('.night-bar').waitFor();
   assert.equal(app.windows().some(win=>win.url().includes('/app/node-night.html')),false);
-  await app.evaluate(()=>globalThis.__recallNodeTick(Date.now()+31*60_000));
+  await manual.locator('.night-criterion input').nth(1).check();
+  await manual.getByRole('button',{name:'Завершити урок',exact:true}).click();
+  await manual.locator('.night-bar strong').filter({hasText:'Урок завершено'}).waitFor();
+  await waitFor(async()=>Boolean((await snapshot()).progress.lessons['setup-tools'].completedAt),'lesson completed without the quiz');
+  assert.equal((await snapshot()).progress.lessons['setup-tools'].quizPassed,false);
   await manual.getByRole('button',{name:'Зберегти й вийти'}).click();
   await waitFor(()=>manual.isClosed(),'manual practice can finish');
   console.log('PASS exact schedule settings persisted, with manual Node.js when set to None');

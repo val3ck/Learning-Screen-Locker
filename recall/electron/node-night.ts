@@ -10,8 +10,8 @@ import { defaultDuration, defaultStart, minuteMs } from '../src/core/tracks';
 import { isClockTime, kyivDayKey, type ClockTime } from '../src/core/calendar';
 import path from 'node:path';
 import {
-  nodeInvitationDay, nextNightStep, reviewNightProgress, validNightDocument,
-  type CourseNight, type NightDocument, type NightRun,
+  nodeInvitationDay, nightLessonGoal, reviewNightProgress, validNightDocument,
+  type CourseNight, type NightDocument, type NightRun, type NightSection,
 } from '../src/core/node-night';
 import { FocusGuard } from './focus-guard';
 import { NodeNightAI } from './node-night-ai';
@@ -156,7 +156,7 @@ export class NodeNight {
 
   private async health() {
     const status = await this.request('health');
-    if (status?.app !== 'backend-path' || status.protocol !== 1 || typeof status.ready !== 'boolean')
+    if (status?.app !== 'backend-path' || status.protocol !== 1 || status.lessonGoal !== 1 || typeof status.ready !== 'boolean')
       throw Error('На порту 5174 потрібна оновлена версія Backend Path.');
     return status as { ready: boolean };
   }
@@ -185,7 +185,7 @@ export class NodeNight {
         !Number.isInteger(value.totalModules) || value.totalModules<1 || value.completedModules<0 || value.completedModules>value.totalModules || value.candidate &&
           (!/^[a-z0-9-]+$/.test(value.candidate.lessonId) ||
           !['lecture','practice','check'].includes(value.candidate.section) ||
-          ![5,10,20].includes(value.candidate.minutes))) {
+          !Number.isFinite(value.candidate.minutes) || value.candidate.minutes<=0)) {
       throw Error('Спочатку відкрий Backend Path у звичному браузері та дочекайся синхронізації.');
     }
     return value;
@@ -365,6 +365,7 @@ export class NodeNight {
       steps: [this.course.candidate], passed: [],
     };
     this.running = run;
+    this.stateProbeAt = 0;
     this.monotonicDeadline = performance.now() + budget;
     if (!this.preview && !this.options.isolated) {
       this.document.runs = [...this.document.runs.slice(-365), run];
@@ -382,16 +383,12 @@ export class NodeNight {
 
   private view() {
     const run = this.running!;
-    const step = run.steps.at(-1)!;
+    const start = run.steps[0];
     const course = this.course!;
-    const counts = course.lessonCounts?.[step.lessonId];
-    return {
-      deadline: run.deadline, phase: this.phase, step,
-      next: this.phase === 'learning' ? nextNightStep(run, course, Date.now()) : null,
-      done: run.passed.length, stepDone: run.passed.includes(step.id),
-      completedModules: course.completedModules, totalModules: course.totalModules,
-      criteriaDone: counts?.criteriaDone ?? step.criteriaDone, lessonsDone: counts?.lessonsDone ?? step.lessonsDone,
-    };
+    const goal = nightLessonGoal(run, course);
+    const section: NightSection = goal.lectureRead ? 'practice' : 'lecture';
+    const step = {...start, section, title:goal.lectureRead?'Виконай критерії практики й заверши урок':'Прочитай лекцію'};
+    return {deadline:run.deadline,phase:this.phase,step,...goal};
   }
 
   private publish() {
@@ -416,7 +413,11 @@ export class NodeNight {
     const before = run.passed.length;
     this.course = current;
     reviewNightProgress(run, current);
-    if (this.phase === 'wrap-up' && run.passed.includes(run.steps.at(-1)!.id)) this.phase = 'finished';
+    if (this.phase !== 'finished' && nightLessonGoal(run,current).lessonDone) {
+      this.phase = 'finished';
+      this.releaseScreens();
+      this.options.onStatus();
+    }
     if (run.passed.length !== before && !this.preview && !this.options.isolated) await this.save();
     this.publish();
   }
@@ -498,30 +499,21 @@ export class NodeNight {
     const run = this.running;
     if (!run || !this.browser || !this.course) throw Error('Нічна сесія закрита.');
     this.applyDeadline(Date.now());
-    const step = run.steps.at(-1)!;
     if (action === 'editor') {
-      if (this.phase !== 'learning' || step.section !== 'practice') return;
+      if (this.phase !== 'learning' || !nightLessonGoal(run,this.course).lectureRead) return;
       this.phase = 'editor';
       this.releaseScreens();
       this.browser.minimize();
       this.publish();
       return;
     }
-    if (action !== 'exit') await this.refresh();
-    else await this.refresh().catch(() => {});
+    if (action !== 'exit') throw Error('Невідома дія Node.js.');
+    await this.refresh().catch(() => {});
     if (this.running !== run) return;
     this.applyDeadline(Date.now());
-    if (action === 'exit') {
-      if (this.phase !== 'wrap-up' && this.phase !== 'finished' && !run.passed.includes(step.id))
-        throw Error('Спочатку заверши поточний крок або дочекайся кінця сесії.');
-      this.stop(run.passed.includes(step.id) ? 'finished' : 'partial');
-    } else if (action === 'next') {
-      const next = nextNightStep(run, this.course, Date.now());
-      if (!next || this.phase !== 'learning') throw Error('Наступний крок уже не вкладається в час.');
-      run.steps.push(next);
-      if (!this.preview && !this.options.isolated) await this.save();
-      this.publish();
-    } else throw Error('Невідома дія Node.js.');
+    if (this.phase !== 'wrap-up' && this.phase !== 'finished')
+      throw Error('Заверши урок або збережи частковий результат після закінчення часу.');
+    this.stop(nightLessonGoal(run,this.course!).lessonDone ? 'finished' : 'partial');
   }
 
   private control(event: IpcMainInvokeEvent, settings = false) {

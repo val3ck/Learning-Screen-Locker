@@ -3,7 +3,9 @@ import type {TrackStart} from './tracks';
 import type {ScheduleState,SessionRecord} from './contracts';
 export const WARNING_MS=2*60000;
 export const SNOOZE_MS=30*60000;
-export function needsWarning(now:Date,start?:TrackStart):boolean {return start!==null&&(start!==undefined&&start!=='activity'||kyivParts(now).hour<16);}
+export function needsWarning(now:Date,start?:TrackStart,warnAfter16=true):boolean {
+  return start!==null&&(warnAfter16||start!==undefined&&start!=='activity'||kyivParts(now).hour<16);
+}
 export function automaticDayAllowed(now:Date,enabledAfterDay:string):boolean {return dayKey(now)>enabledAfterDay;}
 export function hasFinishedToday(sessions:SessionRecord[],now:Date,moduleId='postgresql'):boolean {
   const current=dayKey(now);
@@ -20,7 +22,7 @@ export function snoozeSchedule(previous:ScheduleState,now=new Date()):ScheduleSt
   if(previous.finished)return previous;
   return {...previous,eligible:true,activeMs:Math.max(previous.activeMs,previous.delayMs),snoozedUntil:now.getTime()+SNOOZE_MS,warned:false,triggered:false,warningRemainingMs:undefined,lastTick:now.getTime()};
 }
-export function tickSchedule(previous:ScheduleState,input:{now:Date; active:boolean; returned:boolean; hasProgress:boolean; warningVisible?:boolean; start?:TrackStart},random=Math.random):{state:ScheduleState; action:'none'|'warn'|'start'} {
+export function tickSchedule(previous:ScheduleState,input:{now:Date; active:boolean; returned:boolean; hasProgress:boolean; warningVisible?:boolean; start?:TrackStart; warnAfter16?:boolean},random=Math.random):{state:ScheduleState; action:'none'|'warn'|'start'} {
   const now=input.now.getTime();
   let state={...previous};
   if(state.dayKey!==dayKey(input.now))state={...newSchedule(input.now,random),snoozedUntil:previous.snoozedUntil&&previous.snoozedUntil>now?previous.snoozedUntil:undefined};
@@ -33,8 +35,7 @@ export function tickSchedule(previous:ScheduleState,input:{now:Date; active:bool
   if(state.snoozedUntil&&now<state.snoozedUntil)return {state,action:'none'};
   if(state.snoozedUntil){state.snoozedUntil=undefined;state.warned=false;state.warningRemainingMs=undefined;}
   if(input.active)state.activeMs+=delta;
-  if(!needsWarning(input.now,input.start)){
-    state.warned=false;state.warningRemainingMs=undefined;
+  if(!state.warned&&!needsWarning(input.now,input.start,input.warnAfter16)){
     if(input.active&&state.activeMs>=state.delayMs){state.triggered=true;return {state,action:'start'};}
     return {state,action:'none'};
   }

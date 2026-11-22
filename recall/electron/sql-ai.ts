@@ -38,7 +38,7 @@ export class SQLAI {
       if(recent.has(task.templateId)||this.bank.used.includes(task.templateId))continue;
       const profile=practiceProfile(task);
       if(profile.focus.join(',')!==plannedFocus||otherShapes.has(profile.shape))continue;
-      this.bank.records=this.bank.records.filter(r=>r!==record);this.bank.used=[...this.bank.used,task.templateId].slice(-100);void this.store.write(file,this.bank);
+      this.bank.records=this.bank.records.filter(r=>r!==record);this.bank.used=[...this.bank.used,task.templateId].slice(-100);void this.store.write(file,this.bank).catch(()=>{this.message='Не вдалося зберегти SQL-вправи з кешу.';});
       task.selectionReason=[base.selectionReason,'Згенеровано '+record.model+'; перевірено PostgreSQL на трьох наборах даних.'].filter(Boolean).join(' ');return task;
     }catch{this.bank.records=this.bank.records.filter(r=>r!==record);}}
     return base;

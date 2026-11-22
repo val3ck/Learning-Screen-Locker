@@ -30,7 +30,7 @@ export function addSpeedBonus(module:LearningModule,state:ModuleState,sessions:S
   const learningAllowed=allowNewTopic&&newTopic&&newTopic.prerequisites.every(id=>known.has(id))&&!session.tasks.some(t=>t.learning);
   if(task.moduleId!==session.moduleId||!task.topicIds.every(id=>known.has(id)||learningAllowed&&id===newTopic!.id))throw new Error('Додаткова вправа виходить за межі вивченого або одного дозволеного навчального кроку.');
   if(session.tasks.some(t=>t.id===task.id))throw new Error('Додаткова вправа має бути новою.');
-  session.baseTaskCount??=3;session.tasks.push(task);session.answers.push(task.starter);session.hintLevels.push(0);session.solved.push(false);session.taskElapsedMs.push(0);session.currentIndex=session.tasks.length-1;
+  session.baseTaskCount??=3;session.tasks.push(task);session.answers.push(task.starter);session.hintLevels.push(0);session.solved.push(false);session.taskElapsedMs.push(0);
   return true;
 }
 export function sqlDuration(session:Pick<SessionRecord,'durationMinutes'>):number {

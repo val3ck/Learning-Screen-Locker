@@ -17,6 +17,7 @@ void api.state().then(state=>{
     $('later').onclick=()=>void send('snooze',$('later'));
     return;
   }
+  if(state.showBar===false)return;
   $('title').textContent=state.title;
   $('bar').hidden=false;
   $('finish').onclick=()=>void send('finish',$('finish'));

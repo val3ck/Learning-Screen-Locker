@@ -15,12 +15,12 @@ test('night stages use read, actual practice criteria, and the regular lesson co
   let state = freshProgress();
   assert.equal(nightPlan(state).candidate?.id, first.id + '/lecture');
   state = updateLesson(state, first.id, {read:true});
-  assert.equal(nightPlan(state).candidate?.id, first.id + '/practice/0');
-  assert.equal(nightPlan(state).candidate?.minutes,20);
-  state = updateLesson(state, first.id, {checks:first.criteria.map((_,i)=>i)});
-  assert.equal(nightPlan(state).candidate?.section,'check');
+  assert.equal(nightPlan(state).candidate?.id, first.id + '/practice');
+  assert.equal(nightPlan(state).candidate?.criteriaRequired,2);
+  state = updateLesson(state, first.id, {checks:[0,1]});
+  assert.equal(nightPlan(state).candidate?.section,'practice');
   assert.equal(nightPlan(state).completed.includes(first.id + '/check'),false);
-  state = completeLesson(updateLesson(state, first.id, {quizPassed:true}), first);
+  state = completeLesson(state, first);
   assert.equal(nightPlan(state).candidate?.lessonId, lessons[1].id);
   assert.equal(nightPlan(state).completed.includes(first.id + '/check'),true);
 });

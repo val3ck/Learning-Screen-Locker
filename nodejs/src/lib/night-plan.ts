@@ -1,5 +1,5 @@
 import { lessonById, lessons, moduleById, modules, prerequisitesFor } from '../content/catalog';
-import { getLessonProgress, isComplete, nextLesson, type Progress, type Step } from './progress';
+import { getLessonProgress, isComplete, nextLesson, requiredPracticeChecks, type Progress, type Step } from './progress';
 
 export function nightPlan(progress: Progress) {
   const lesson = nextLesson(progress);
@@ -19,16 +19,16 @@ export function nightPlan(progress: Progress) {
   const completedModules = modules.filter(module => completedByModule.get(module.id) === byModule.get(module.id)!.length).length;
   if (!lesson) return { candidate: null, completed, completedModules, totalModules: modules.length, lessonCounts };
   const saved = getLessonProgress(progress, lesson.id);
-  const criterion = lesson.criteria.findIndex((_, index) => !saved.checks.includes(index));
-  const section: Step = !saved.read ? 'lecture' : criterion >= 0 ? 'practice' : 'check';
-  const minutes = section === 'lecture' ? 10 : section === 'practice' ? 20 : 5;
+  const section: Step = saved.read ? 'practice' : 'lecture';
+  const minutes = section === 'lecture' ? lesson.lectureMinutes : lesson.practiceMinutes;
   const module = moduleById.get(lesson.moduleId)!;
   const peers = byModule.get(module.id)!;
   return {
     candidate: {
-      id: lesson.id + '/' + section + (section === 'practice' ? '/' + criterion : ''),
+      id: lesson.id + '/' + section,
       lessonId: lesson.id, lesson: lesson.title, module: module.title, section, minutes,
-      title: section === 'lecture' ? 'Прочитай концепт' : section === 'practice' ? lesson.criteria[criterion] : 'Пройди квіз і заверши урок',
+      title: section === 'lecture' ? 'Прочитай лекцію' : 'Виконай критерії практики й заверши урок',
+      criteriaRequired: requiredPracticeChecks(lesson),
       criteriaDone: saved.checks.length, criteriaTotal: lesson.criteria.length,
       lessonsDone: peers.filter(item => isComplete(progress, item.id)).length, lessonsTotal: peers.length,
     },

@@ -74,6 +74,22 @@ $('#app').innerHTML = `
     <div class="drawer-content" id="drawer-content"></div><footer class="drawer-footer" id="drawer-footer"></footer>
   </aside>`;
 
+const recallSession=window.recallVimSession;
+let recallDeadline, recallTimer;
+function drawRecallClock(){
+  const display=$('#recall-vim-clock');
+  if(!display||!recallDeadline)return;
+  const left=Math.max(0,Math.ceil((recallDeadline-Date.now())/1000));
+  display.textContent=Math.floor(left/60)+':'+String(left%60).padStart(2,'0');
+}
+function recallMenu(){
+  if(!recallSession)return '';
+  return `<div class="recall-vim-session">
+    <span>${language==='uk'?'Залишилось':'Time left'} <time id="recall-vim-clock">—</time></span>
+    <button type="button" data-action="finish-recall">${language==='uk'?'Зберегти й вийти':'Save and exit'}</button>
+    <span id="recall-vim-status" role="status"></span>
+  </div>`;
+}
 const luna=tutorChat(()=>({
   id:examSession?'exam:'+chapter:sandbox?'sandbox':chapter+':'+step,
   text:JSON.stringify({
@@ -303,15 +319,31 @@ function renderMenu(){
   document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.tab===menuTab)));
   const langs=`<div class="language-switch" aria-label="${t('language')}"><button data-language="uk" aria-pressed="${language==='uk'}">UKR</button><span>/</span><button data-language="en" aria-pressed="${language==='en'}">ENG</button></div>`;
   const audioControls=`<section class="sound-controls" data-audio-state="${sound.state}" aria-label="${t('sound')}"><div class="sound-heading"><span>${t('sound')}</span><button data-action="sound-toggle" aria-label="${t(sound.settings.muted?'enableSound':'muteSound')}" aria-pressed="${!sound.settings.muted}">${t(sound.settings.muted?'soundOff':'soundOn')}</button></div>${['dialogue','music'].map(channel=>`<label class="sound-slider"><span>${t(channel==='dialogue'?'dialogueVolume':'musicVolume')}</span><input type="range" min="0" max="100" step="1" value="${Math.round(sound.settings[channel]*100)}" data-volume="${channel}" aria-label="${t(channel==='dialogue'?'dialogueVolume':'musicVolume')}"><output id="volume-${channel}">${Math.round(sound.settings[channel]*100)}%</output></label>`).join('')}</section>`;
-  $('#drawer-footer').innerHTML=(resetConfirm?`<p class="reset-question">${t('resetQuestion')}</p><div class="menu-actions"><button data-action="confirm-reset">${t('confirm')}</button><button data-action="cancel-reset">${t('cancel')}</button></div>`:`<div class="menu-actions">${!sandbox?`<button data-action="hint">${t('hint')}</button>`:''}<button data-action="restart">${t('restart')}</button><button data-action="sandbox">${t('sandbox')}</button><button data-action="fullscreen">${t('fullscreen')}</button><button data-action="replay">${t('replay')}</button></div><div class="menu-footnote"><span>${totalDone()} / 58</span><button data-action="reset">${t('reset')}</button><span>${t('back')}</span></div>`)+audioControls+langs;
+  $('#drawer-footer').innerHTML=(resetConfirm?`<p class="reset-question">${t('resetQuestion')}</p><div class="menu-actions"><button data-action="confirm-reset">${t('confirm')}</button><button data-action="cancel-reset">${t('cancel')}</button></div>`:`<div class="menu-actions">${!sandbox?`<button data-action="hint">${t('hint')}</button>`:''}<button data-action="restart">${t('restart')}</button><button data-action="sandbox">${t('sandbox')}</button>${recallSession?'':`<button data-action="fullscreen">${t('fullscreen')}</button>`}<button data-action="replay">${t('replay')}</button></div><div class="menu-footnote"><span>${totalDone()} / 58</span><button data-action="reset">${t('reset')}</button><span>${t('back')}</span></div>`)+recallMenu()+audioControls+langs;
+  drawRecallClock();
   $('#manual-search')?.addEventListener('input',e=>{manualQuery=e.target.value;$('#manual-results').innerHTML=manualEntries();});
 }
-function openMenu(){if(phase==='silent')return;menuOpen=true;sound.setMenu(true);resetConfirm=false;renderMenu();$('#drawer').hidden=false;$('#menu-shade').hidden=false;$('#menu-toggle').setAttribute('aria-expanded','true');$('.console').inert=true;requestPointerUpdate();requestAnimationFrame(()=>{$('#drawer').classList.add('open');$('#menu-shade').classList.add('open');});$(`[data-tab="${menuTab}"]`).focus();}
-function closeMenu(){menuOpen=false;sound.setMenu(false);$('#drawer').classList.remove('open');$('#menu-shade').classList.remove('open');$('#drawer').hidden=true;$('#menu-shade').hidden=true;$('.console').inert=false;$('#menu-toggle').setAttribute('aria-expanded','false');requestPointerUpdate();focusEditor();}
+function openMenu(){if(phase==='silent')return;menuOpen=true;
+  if(recallSession&&!recallTimer){
+    void recallSession.state().then(state=>{recallDeadline=state.deadline;drawRecallClock();}).catch(()=>{});
+    recallTimer=setInterval(drawRecallClock,1000);
+  }
+  sound.setMenu(true);resetConfirm=false;renderMenu();$('#drawer').hidden=false;$('#menu-shade').hidden=false;$('#menu-toggle').setAttribute('aria-expanded','true');$('.console').inert=true;requestPointerUpdate();requestAnimationFrame(()=>{$('#drawer').classList.add('open');$('#menu-shade').classList.add('open');});$(`[data-tab="${menuTab}"]`).focus();}
+function closeMenu(){menuOpen=false;clearInterval(recallTimer);recallTimer=undefined;sound.setMenu(false);$('#drawer').classList.remove('open');$('#menu-shade').classList.remove('open');$('#drawer').hidden=true;$('#menu-shade').hidden=true;$('.console').inert=false;$('#menu-toggle').setAttribute('aria-expanded','false');requestPointerUpdate();focusEditor();}
 function setLanguage(lang){language=lang;localizeChrome();renderSpeechText();renderBuffer();renderExam();if(menuOpen){renderMenu();$(`[data-language="${language}"]`)?.focus();}persist();}
 async function fullscreen(){closeMenu();try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{if(phase==='playing')speak({kind:'fullscreen'});}}
 function dispatch(action,data){
   if(action==='close-menu')return closeMenu();
+  if(action==='finish-recall'&&recallSession){
+    const button=$('[data-action="finish-recall"]');
+    button.disabled=true;
+    void recallSession.finish().catch(error=>{
+      button.disabled=false;
+      const status=$('#recall-vim-status');
+      if(status)status.textContent=error.message.replace(/^Error invoking remote method .*?: Error: /,'');
+    });
+    return;
+  }
   if(action==='sound-toggle'){sound.setMuted(!sound.settings.muted);if(!sound.settings.muted)sound.unlock().then(()=>sound.cue());persist();renderMenu();$('[data-action="sound-toggle"]')?.focus();return;}
   if(action==='mission'){if(sandbox)sandboxSaved=engine.text;closeMenu();startMission(Number(data.chapter),Number(data.step));}
   if(action==='exam'){closeMenu();const c=Number(data.chapter);startMission(c,chapters[c].missions.length-1,false,Number(data.exam));}

@@ -35,8 +35,10 @@ test('Повернення після блокування починає поп
 test('Швидка сесія додає максимум дві вправи на слабкі відомі теми',()=>{
   const moduleState=state();const session=createSession(postgresql,moduleState,[],'2026-11-13','practice',now,52);
   const weak=session.tasks[0].topicIds[0];recordAttempt(session,{status:'incorrect',message:'wrong'},true,now);session.solved=[true,true,true];session.activeMs=120000;
+  session.currentIndex=2;
   const progress=JSON.stringify(moduleState.progress);
   assert.equal(addSpeedBonus(postgresql,moduleState,[],session,5,now,61),true);assert.equal(session.tasks.length,4);assert.equal(session.tasks[3].topicIds[0],weak);assert.ok(session.tasks[3].selectionReason?.includes('помилки'));
+  assert.equal(session.currentIndex,2,'The checked exercise stays open until Next.');
   assert.equal(addSpeedBonus(postgresql,moduleState,[],session,5,now,62),false);session.solved[3]=true;
   assert.equal(addSpeedBonus(postgresql,moduleState,[],session,5,now,62),true);session.solved[4]=true;
   assert.equal(addSpeedBonus(postgresql,moduleState,[],session,5,now,63),false);assert.equal(session.tasks.length,5);assert.ok(validSession(session));

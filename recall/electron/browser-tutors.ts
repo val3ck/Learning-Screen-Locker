@@ -65,9 +65,18 @@ export class BrowserTutors {
         throw Error('Відкрий тренажер у Recall.');
       return this.options.chatPreferences(run.tutor.id,value);
     });
+    ipcMain.handle('recall:vim-session',async(event,action:unknown)=>{
+      const run=this.session;
+      if(run?.tutor.id!=='vim'||event.sender!==run.site.webContents||
+          event.senderFrame!==run.site.webContents.mainFrame||!run.ready||run.closing)
+        throw Error('Відкрий активну сесію Neovim Quest.');
+      if(action==='state')return {deadline:run.deadline};
+      if(action==='finish')return this.finish();
+      throw Error('Невідома дія Neovim Quest.');
+    });
     ipcMain.handle('recall:tutor-state',event=>{
       if(event.sender===this.session?.window.webContents)return {
-        mode:'session',title:this.session.tutor.title,deadline:this.session.deadline,
+        mode:'session',title:this.session.tutor.title,deadline:this.session.deadline,showBar:this.session.tutor.id!=='vim',
       };
       if(event.sender===this.invitation?.window.webContents)return {mode:'invite',title:this.invitation.tutor.title};
       throw Error('Невідоме вікно тренажера.');
@@ -209,7 +218,9 @@ export class BrowserTutors {
       const endpoint=await this.ensureEndpoint(tutor);
       if(!this.options.isAvailable())throw Error('Інша сесія вже почалася.');
       this.options.beforeStart();
-      const win=this.trusted({width:1280,height:850,minWidth:560,minHeight:480,title:tutor.title});
+      const fullscreen=!this.options.isolated||this.options.testGuard;
+      const geometry=fullscreen?screen.getPrimaryDisplay().bounds:{width:1280,height:850};
+      const win=this.trusted({...geometry,frame:false,minWidth:560,minHeight:480,title:tutor.title});
       const site=new WebContentsView({webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,
         preload:path.join(this.options.preloadRoot,'browser-tutor-site-preload.cjs'),partition:this.options.isolated?'tutor-test-'+id:'persist:recall-tutor-'+id}});
       const duration=this.options.duration(id)*minuteMs;
@@ -219,9 +230,15 @@ export class BrowserTutors {
       const layout=()=>{
         if(win.isDestroyed())return;
         const {width,height}=win.getContentBounds();
-        site.setBounds({x:0,y:52,width,height:Math.max(1,height-52)});
+        const y=id==='vim'?0:52;
+        site.setBounds({x:0,y,width,height:Math.max(1,height-y)});
       };
-      win.on('resize',layout);win.on('enter-full-screen',layout);win.on('leave-full-screen',layout);
+      win.on('resize',layout);win.on('enter-full-screen',layout);
+      win.on('leave-full-screen',()=>{
+        if(this.session===run&&this.guard.active&&!win.isDestroyed())win.setFullScreen(true);
+        layout();
+      });
+      win.on('minimize',()=>{if(this.session===run&&this.guard.active&&!win.isDestroyed())win.restore();});
       layout();
       site.webContents.setWindowOpenHandler(()=>({action:'deny'}));
       site.webContents.on('will-navigate',(event,url)=>{if(new URL(url).origin!==endpoint.origin)event.preventDefault();});
@@ -246,9 +263,12 @@ export class BrowserTutors {
       }finally{load.abort();}
       if(this.session!==run||win.isDestroyed())return;
       run.ready=true;
-      if(!this.options.isolated||this.options.testGuard){this.guard.enter(win);this.coverDisplays();}
       if(!this.options.isolated){this.schedule.offers[id]={day:kyivDayKey(new Date()),offered:true};await this.save();}
-      win.show();site.webContents.focus();
+      if(this.session!==run||win.isDestroyed())return;
+      if(fullscreen)win.setBounds(screen.getPrimaryDisplay().bounds);
+      win.show();
+      if(fullscreen){this.guard.enter(win);layout();this.coverDisplays();}
+      site.webContents.focus();
     }catch(error){if(this.session)this.dispose();throw error;}
     finally{this.launching=false;this.options.update();}
   }
@@ -285,7 +305,7 @@ export class BrowserTutors {
   coverDisplays(){
     for(const cover of this.covers)if(!cover.isDestroyed())cover.destroy();
     this.covers=[];
-    if(!this.guard.active||this.options.isolated)return;
+    if(!this.guard.active||this.options.isolated&&!this.options.testGuard)return;
     const primary=screen.getPrimaryDisplay();
     for(const display of screen.getAllDisplays().filter(d=>d.id!==primary.id)){
       const cover=new BrowserWindow({...display.bounds,show:false,frame:false,skipTaskbar:true,focusable:false,alwaysOnTop:true,backgroundColor:'#102d29',

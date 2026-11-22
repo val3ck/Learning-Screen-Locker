@@ -11,7 +11,7 @@ import {SQLAI} from './sql-ai';
 import {SQLChat} from './sql-chat';
 import type {Bootstrap,ModuleState,ScheduleState,SessionRecord,Settings} from '../src/core/contracts';
 import {getModule} from '../src/modules/registry';
-import {tickSchedule,snoozeSchedule,WARNING_MS,needsWarning,automaticDayAllowed,hasFinishedToday,completeScheduleForDay} from '../src/core/scheduler';
+import {tickSchedule,snoozeSchedule,WARNING_MS,automaticDayAllowed,hasFinishedToday,completeScheduleForDay} from '../src/core/scheduler';
 import {createSession,updateHistory,canSurrender,sqlDuration,addSpeedBonus,isStaleSessionUpdate,availableTopicIds,learnedTopics} from '../src/core/session';
 import {dayKey,formatClockTime,isClockTime,kyivDayKey} from '../src/core/calendar';
 import {FocusClock} from '../src/core/learning';
@@ -62,7 +62,11 @@ protocol.registerSchemesAsPrivileged([{scheme:'recall',privileges:{standard:true
 let store:Store,settings:Settings,moduleState:ModuleState,schedule:ScheduleState,sessions:SessionRecord[]=[];
 let window:BrowserWindow|null=null,tray:Tray|null=null,overlays:BrowserWindow[]=[];
 let activeSession:SessionRecord|null=null;let locked=false,suspended=false,quitting=false,tearingDown=false;
-let returnSignal=true,previousIdle=0,sourceStamp=0,lastSourcePoll=0,lastPersist=0,lastScheduleSnap='',lastEnglishSnap='',tickBusy=false,sessionTick=Date.now();
+let returnSignal=true,previousIdle=0,sourceStamp=0,lastSourcePoll=0,lastPersist=0,lastScheduleSnap='',lastEnglishSnap='',sessionTick=Date.now();
+let tickTimer:ReturnType<typeof setInterval>|undefined;
+let tickWork:Promise<void>|undefined;
+let shutdownComplete=false;
+let sqlPrepareTimer:ReturnType<typeof setTimeout>|undefined;
 let focusSurface=false;
 let nodeNight:NodeNight;
 let browserTutors:BrowserTutors;
@@ -88,20 +92,29 @@ function focusTaskActive(){return !!browserTutors?.protected||!!nodeNight?.prote
 function nativeTaskBusy(){return englishNative||!!pendingFocusId||!!activeSession&&!activeSession.endedAt&&!activeSession.paused;}
 function taskBusy(){return nativeTaskBusy()||!!nodeNight?.busy||!!browserTutors?.busy;}
 function updateTray(){
-  if(!tray)return;
-  tray.setContextMenu(Menu.buildFromTemplate([{label:focusTaskActive()?'Повернутися до задачі':'Відкрити SQL Recall',click:showDashboard},{label:'Пара / демонстрація — відкласти на 30 хв',enabled:!focusTaskActive(),click:()=>void snoozeDaily()},{label:'Потренуватися зараз',enabled:!taskBusy(),click:()=>void begin('practice')},{label:'English · почати / продовжити',enabled:!taskBusy(),click:()=>void beginEnglish().catch(error=>{store.messages.push(String(error));showDashboard();})},{label:'Node.js · повернутися до уроку',visible:!!nodeNight?.canResume,click:()=>nodeNight.resume()},{label:'Node.js · потренуватися',enabled:!taskBusy(),click:()=>void nodeNight.startPractice().catch(error=>{store.messages.push(String(error));showDashboard();})},{label:'Node.js · налаштування',enabled:!taskBusy(),click:()=>nodeNight.openSettings()},...BROWSER_TUTORS.map(id=>({label:id==='git'?'Git Tutor · потренуватися':'Neovim Quest · потренуватися',enabled:!taskBusy(),click:()=>void browserTutors.open(id).catch(error=>{store.messages.push(String(error));showDashboard();})})),{label:'Завершити програму',enabled:!focusTaskActive(),click:()=>app.quit()}]));
+  if(!tray||tray.isDestroyed()||quitting)return;
+  tray.setContextMenu(Menu.buildFromTemplate([{label:focusTaskActive()?'Повернутися до задачі':'Відкрити SQL Recall',click:showDashboard},{label:'Пара / демонстрація — відкласти на 30 хв',enabled:!focusTaskActive(),click:()=>void snoozeDaily().catch(reportBackgroundError)},{label:'Потренуватися зараз',enabled:!taskBusy(),click:()=>void begin('practice').catch(reportBackgroundError)},{label:'English · почати / продовжити',enabled:!taskBusy(),click:()=>void beginEnglish().catch(error=>{store.messages.push(String(error));showDashboard();})},{label:'Node.js · повернутися до уроку',visible:!!nodeNight?.canResume,click:()=>nodeNight.resume()},{label:'Node.js · потренуватися',enabled:!taskBusy(),click:()=>void nodeNight.startPractice().catch(error=>{store.messages.push(String(error));showDashboard();})},{label:'Node.js · налаштування',enabled:!taskBusy(),click:()=>nodeNight.openSettings()},...BROWSER_TUTORS.map(id=>({label:id==='git'?'Git Tutor · потренуватися':'Neovim Quest · потренуватися',enabled:!taskBusy(),click:()=>void browserTutors.open(id).catch(error=>{store.messages.push(String(error));showDashboard();})})),{label:'Завершити програму',enabled:!focusTaskActive(),click:()=>app.quit()}]));
 }
 let warningPanel:WarningPanel,shortcutAvailable=false,warningPreview=false,previewUntil=0,snoozing=false;
 const SNOOZE_SHORTCUT='Control+Shift+A';
 const launchLock=demo||smoke||app.requestSingleInstanceLock();
 if(!launchLock)app.quit();
 app.on('second-instance',()=>showDashboard());
-function emit(type:'daily'|'progress'|'practice'|'tick'|'pause'|'schedule'|'english',active?:boolean,clockValue?:{id:string;activeMs:number;taskElapsedMs:number[];breakRemainingMs?:number}){window?.webContents.send('recall:event',{type,active,clock:clockValue});}
+function reportBackgroundError(error:unknown){
+  const message=String(error);
+  if(store&&!store.messages.includes(message))store.messages.push(message);
+  console.error(error);
+}
+function emit(type:'daily'|'progress'|'practice'|'tick'|'pause'|'schedule'|'english',active?:boolean,clockValue?:{id:string;activeMs:number;taskElapsedMs:number[];breakRemainingMs?:number}){
+  const win=window;
+  if(quitting||!win||win.isDestroyed()||win.webContents.isDestroyed())return;
+  win.webContents.send('recall:event',{type,active,clock:clockValue});
+}
 function armShortcut(){
   if(globalShortcut.isRegistered(SNOOZE_SHORTCUT)){shortcutAvailable=true;return;}
   shortcutAvailable=globalShortcut.register(SNOOZE_SHORTCUT,()=>{void snoozeDaily().catch(()=>failOpen());});
 }
-function disarmShortcut(){globalShortcut.unregister(SNOOZE_SHORTCUT);shortcutAvailable=false;}
+function disarmShortcut(){if(app.isReady())globalShortcut.unregister(SNOOZE_SHORTCUT);shortcutAvailable=false;}
 function warningStatus(){return {remainingSeconds:Math.ceil((warningPreview?Math.max(0,previewUntil-Date.now()):(warningModule==='english'?englishSchedule?.warningRemainingMs:schedule.warningRemainingMs)??WARNING_MS)/1000),shortcutAvailable,pausedSession:!!activeSession?.paused};}
 function hideWarning(){warningPanel?.destroy();warningModule='postgresql';}
 async function snoozeDaily():Promise<Bootstrap>{
@@ -142,18 +155,25 @@ function configureWindow(win:BrowserWindow){
   win.on('query-session-end',allowSystemEnd);win.on('session-end',allowSystemEnd);
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   win.webContents.on('will-navigate',(event,url)=>{if(!url.startsWith('recall://app/')&&!url.startsWith('http://127.0.0.1:5173/'))event.preventDefault();});
-  win.webContents.on('render-process-gone',()=>failOpen());win.on('unresponsive',()=>{failOpen();win.destroy();});
+  win.webContents.on('render-process-gone',()=>{if(!quitting&&!systemEnding)failOpen();});
+  win.on('unresponsive',()=>{if(quitting||systemEnding||win.isDestroyed())return;failOpen();win.destroy();});
 }
 function makeWindow(){
   if(window&&!window.isDestroyed())return window;
   window=new BrowserWindow({width:1280,height:880,minWidth:940,minHeight:680,show:false,backgroundColor:'#f5f4ee',autoHideMenuBar:true,title:'SQL Recall',webPreferences:{preload:path.join(__dirname,'preload.cjs'),nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}});
   configureWindow(window);
-  const url=process.env.RECALL_DEV_URL||'recall://app/index.html';void window.loadURL(url);
+  const win=window;
+  const url=process.env.RECALL_DEV_URL||'recall://app/index.html';
+  void win.loadURL(url).catch(error=>{
+    if(quitting||window!==win||win.isDestroyed())return;
+    reportBackgroundError(error);
+    if(pendingFocusId)failOpen();
+  });
   window.on('closed',()=>{window=null;if(englishNative&&!quitting&&!systemEnding){failOpen();}if(!quitting&&!systemEnding&&(focusSurface||activeSession&&!activeSession.endedAt&&!activeSession.paused)){clearOverlays();if(activeSession){activeSession.outcome='interrupted';activeSession.endedAt=new Date().toISOString();void finish(activeSession).catch(()=>{});}}if(demo&&!quitting)app.quit();});
   window.once('ready-to-show',()=>{if(!pendingFocusId&&(!process.argv.includes('--background')||demo))window?.show();});
   return window;
 }
-function showDashboard(){if(browserTutors?.protected){browserTutors.resume();return;}if(nodeNight?.protected){nodeNight.resume();return;}const win=makeWindow();if(win.isMinimized())win.restore();win.show();win.focus();}
+function showDashboard(){if(quitting||!app.isReady())return;if(browserTutors?.protected){browserTutors.resume();return;}if(nodeNight?.protected){nodeNight.resume();return;}const win=makeWindow();if(win.isMinimized())win.restore();win.show();win.focus();}
 function applyOverlays(){
   if(!window||!focusSurface)return;
   for(const overlay of overlays)if(!overlay.isDestroyed())overlay.destroy();overlays=[];
@@ -167,6 +187,7 @@ function applyOverlays(){
   window.show();window.focus();updateTray();
 }
 async function begin(mode:SessionRecord['mode'],notify=true){
+  if(quitting)return;
   if(browserTutors?.busy){browserTutors.resume();return;}
   if(nodeNight?.busy){nodeNight.resume();return;}
   if(englishNative){showDashboard();return;}
@@ -294,7 +315,7 @@ async function installHandlers(){
   });
   handle('recall:sql-ai',async(request:any)=>{if(!request||!['settings','prepare','test'].includes(request.action))throw Error('Невідома SQL AI-дія.');if(request.action==='settings')return request.options?sqlAI.save(request.options):sqlAI.status();if(request.action==='test')return sqlAI.test();await sqlAI.prepare(moduleState,sessions,true);return sqlAI.status();});
   handle('recall:sql-chat',(request:unknown)=>sqlChat.ask(activeSession,request));
-  handle('recall:configure',async(value:{autoStart:boolean;minPracticeMinutes?:number})=>{if(!value||typeof value.autoStart!=='boolean'||value.minPracticeMinutes!==undefined&&![5,7,10,15].includes(value.minPracticeMinutes))throw new Error('Некоректні налаштування.');if(!settings.setupComplete){returnSignal=true;settings.dailyEnabledAfterDay=dayKey(new Date());}settings={...settings,setupComplete:true,autoStart:demo||smoke?false:value.autoStart,minPracticeMinutes:value.minPracticeMinutes??settings.minPracticeMinutes};if(!demo&&!smoke)setRecallLoginItem(settings.autoStart);await store.write('settings.json',settings);});
+  handle('recall:configure',async(value:{autoStart:boolean;minPracticeMinutes?:number;sqlWarnAfter16?:boolean})=>{if(!value||typeof value.autoStart!=='boolean'||value.sqlWarnAfter16!==undefined&&typeof value.sqlWarnAfter16!=='boolean'||value.minPracticeMinutes!==undefined&&![5,7,10,15].includes(value.minPracticeMinutes))throw new Error('Некоректні налаштування.');if(!settings.setupComplete){returnSignal=true;settings.dailyEnabledAfterDay=dayKey(new Date());}settings={...settings,setupComplete:true,autoStart:demo||smoke?false:value.autoStart,minPracticeMinutes:value.minPracticeMinutes??settings.minPracticeMinutes,sqlWarnAfter16:value.sqlWarnAfter16??settings.sqlWarnAfter16};if(!demo&&!smoke)setRecallLoginItem(settings.autoStart);await store.write('settings.json',settings);});
   handle('recall:session-ready',async(sessionId:unknown)=>{const sql=activeSession&&sessionId===activeSession.id&&!activeSession.paused&&!activeSession.endedAt,en=englishNative&&sessionId===englishHost.controller.snapshot()?.id&&englishHost.running();if(typeof sessionId!=='string'||sessionId!==pendingFocusId||!sql&&!en)return;clearPendingFocus();systemEnding=false;focusSurface=true;clock.reset();applyOverlays();});
   handle('recall:english-start',async(extend:unknown,lessonId:unknown)=>{if(extend!==undefined&&typeof extend!=='boolean'||lessonId!==undefined&&(typeof lessonId!=='string'||!/^[\w-]{1,80}$/.test(lessonId)))throw Error('Invalid English mode.');await beginEnglish('practice',false,extend===true,lessonId as string|undefined);return englishHost.view();});
   handle('recall:english-pause-extension',()=>{
@@ -432,11 +453,14 @@ englishHost.controller.assessmentBundle(area);const result=await englishAI.grade
     if(!session.endedAt)session.endedAt=new Date().toISOString();await finish(session);
   });
 }
+function scheduleTick(){
+  if(tickWork||quitting)return;
+  tickWork=tick().finally(()=>{tickWork=undefined;});
+}
 async function tick(){
-  if(tickBusy||quitting)return;tickBusy=true;
   try{
     const now=new Date(),starts=startTimes();const idle=powerMonitor.getSystemIdleTime();const active=!locked&&!suspended&&(idle<300||mediaUntil>Date.now());
-    void nodeNight?.tick(now,!locked&&!suspended&&idle<300);
+    void nodeNight?.tick(now,!locked&&!suspended&&idle<300).catch(reportBackgroundError);
     void browserTutors?.tick(now,!locked&&!suspended&&idle<300).catch(error=>store.messages.push(String(error)));
     const elapsed=clock.sample(performance.now(),active&&!pendingFocusId&&!!window?.isFocused()&&waitingUntil<Date.now());
     if(englishNative){const before=englishHost.controller.snapshot();const oldPhase=before?.payload.phase,oldOvertime=before?.payload.overtimeBlock;englishHost.tick(elapsed,active);const run=englishHost.controller.snapshot();if(run?.endedAt){englishHost.release();englishNative=false;tearingDown=true;clearOverlays();tearingDown=false;if(englishHost.done()){englishSchedule.finished=true;await store.write('schedules/english.json',englishSchedule);}emit('english');}else if(oldPhase!==run?.payload.phase||oldOvertime!==run?.payload.overtimeBlock)emit('english');}
@@ -447,17 +471,22 @@ async function tick(){
       else warningPanel.update(warningStatus());
     }else if(!demo&&settings.setupComplete){
       if(hasFinishedToday(sessions,now)&&!focusTaskActive())schedule=completeScheduleForDay(schedule,now);
-      if(!taskBusy()&&!locked&&!suspended)void sqlAI.prepare(moduleState,sessions);
+      if(!taskBusy()&&!locked&&!suspended)void sqlAI.prepare(moduleState,sessions).catch(reportBackgroundError);
       const canSchedule=starts.postgresql!==null&&!browserTutors?.busy&&!nodeNight?.busy&&!englishNative&&!(warningPanel.visible&&warningModule==='english')&&automaticDayAllowed(now,settings.dailyEnabledAfterDay)&&!!availableTopicIds(moduleState).length&&(!activeSession||!!activeSession.endedAt||!!activeSession.paused);
-      const result=tickSchedule(schedule,{now,active,returned,hasProgress:canSchedule,warningVisible:warningPanel.visible&&warningModule==='postgresql',start:starts.postgresql});schedule=result.state;
-      if(!englishNative&&active&&canSchedule&&warningModule!=='english'&&needsWarning(now,starts.postgresql)&&schedule.warned&&!schedule.triggered&&!schedule.finished&&!schedule.snoozedUntil){armShortcut();warningPanel.show(warningStatus());warningPanel.update(warningStatus());}
+      const result=tickSchedule(schedule,{now,active,returned,hasProgress:canSchedule,warningVisible:warningPanel.visible&&warningModule==='postgresql',start:starts.postgresql,warnAfter16:settings.sqlWarnAfter16!==false});schedule=result.state;
+      if(!englishNative&&active&&canSchedule&&warningModule!=='english'&&schedule.warned&&!schedule.triggered&&!schedule.finished&&!schedule.snoozedUntil){armShortcut();warningPanel.show(warningStatus());warningPanel.update(warningStatus());}
       else if(!focusSurface&&warningModule!=='english'){hideWarning();disarmShortcut();}
-      if(result.action==='start'){hideWarning();await store.write('schedule.json',schedule);if(schedule.triggered&&!schedule.snoozedUntil&&!locked&&!suspended&&!englishNative)await begin('daily');}
+      if(result.action==='start'){
+        hideWarning();
+        await store.write('schedule.json',schedule);
+        if(!quitting&&schedule.triggered&&!schedule.snoozedUntil&&!locked&&!suspended&&!englishNative&&!nodeNight?.busy&&!browserTutors?.busy)await begin('daily');
+        else if(schedule.triggered)schedule={...schedule,triggered:false,warningRemainingMs:undefined};
+      }
     }
     if(!browserTutors?.busy&&!nodeNight?.busy&&!demo&&settings.setupComplete&&isClockTime(starts.english)&&englishAI.settings().configured){
       const result=tickEvening(englishSchedule,{now,active,busy:taskBusy()||englishHost.readonly()||warningPanel.visible&&warningModule==='postgresql',enabledAfterDay:settings.englishEnabledAfterDay!,done:englishHost.done(),warningVisible:warningPanel.visible&&warningModule==='english',returned,start:starts.english});englishSchedule=result.state;englishOptional=result.optional;
       if(result.action==='warn'){warningModule='english';armShortcut();warningPanel.show(warningStatus());warningPanel.update(warningStatus());}
-      if(result.action==='start'){hideWarning();disarmShortcut();await beginEnglish('daily');}
+      if(result.action==='start'&&!quitting){hideWarning();disarmShortcut();await beginEnglish('daily');}
       if(warningModule==='english'&&(!active||taskBusy()||englishHost.readonly()||englishSchedule.finished||!englishSchedule.offered||englishSchedule.snoozedUntil)){hideWarning();disarmShortcut();}
     }else if(warningModule==='english'){hideWarning();disarmShortcut();}
     if(englishNative){const run=englishHost.controller.snapshot()!;emit('tick',active,{id:run.id,activeMs:run.payload.extraPractice||run.payload.revisit?run.activeMs:englishHost.controller.day().activeMs,taskElapsedMs:[],breakRemainingMs:run.payload.breakRemainingMs});}
@@ -470,13 +499,45 @@ async function tick(){
       if(activeSession&&!activeSession.endedAt){await store.saveSession(activeSession);await store.write('modules/postgresql/sessions/'+activeSession.id+'.json',getModule('postgresql').controller!.restore(activeSession).snapshot());}
     }
     if(now.getTime()-lastSourcePoll>3000){lastSourcePoll=now.getTime();await pollProgress();}
-  }catch(error){store.messages.push(String(error));failOpen();}finally{tickBusy=false;}
+  }catch(error){reportBackgroundError(error);if(!quitting)failOpen();}
+}
+async function shutdown(){
+  const cleanup=[
+    ()=>tickWork,
+    ()=>hideWarning(),
+    ()=>disarmShortcut(),
+    ()=>nodeNight?.stop(),
+    ()=>browserTutors?.close(),
+    ()=>englishHost?.release(),
+    ()=>languageChecker?.stop(),
+    async()=>{
+      if(activeSession&&!activeSession.endedAt){
+        if(activeSession.paused)await store.saveSession(activeSession);
+        else{
+          activeSession.outcome='interrupted';
+          activeSession.endedAt=new Date().toISOString();
+          await finish(activeSession);
+        }
+      }
+    },
+    ()=>schedule&&store.write('schedule.json',schedule),
+    ()=>englishSchedule&&store.write('schedules/english.json',englishSchedule),
+    ()=>store?.flush(),
+    ()=>{if(tray&&!tray.isDestroyed())tray.destroy();},
+  ];
+  for(const step of cleanup){
+    try{await step();}catch(error){reportBackgroundError(error);}
+  }
 }
 app.on('before-quit',event=>{
-  if(!quitting&&!systemEnding&&focusTaskActive()){event.preventDefault();if(focusGuard.active)showDashboard();return;}
-  if(quitting)return;event.preventDefault();quitting=true;
-  hideWarning();disarmShortcut();nodeNight?.stop();
-  void (async()=>{await browserTutors?.close();englishHost?.release();await languageChecker?.stop();if(activeSession&&!activeSession.endedAt){if(activeSession.paused)await store.saveSession(activeSession);else{activeSession.outcome='interrupted';activeSession.endedAt=new Date().toISOString();await finish(activeSession);}}await store.flush();tray?.destroy();app.quit();})().catch(()=>app.exit());
+  if(shutdownComplete||!app.isReady())return;
+  event.preventDefault();
+  if(quitting)return;
+  if(!systemEnding&&focusTaskActive()){if(focusGuard.active)showDashboard();return;}
+  quitting=true;
+  if(tickTimer)clearInterval(tickTimer);
+  if(sqlPrepareTimer)clearTimeout(sqlPrepareTimer);
+  void shutdown().finally(()=>{shutdownComplete=true;app.quit();});
 });
 app.on('window-all-closed',()=>{if(demo)app.quit();});
 if(launchLock)void app.whenReady().then(async()=>{
@@ -500,7 +561,10 @@ if(launchLock)void app.whenReady().then(async()=>{
   const catalogIds=new Set(getModule(settings.activeModuleId).catalog.map(topic=>topic.id));
   const learned=[...new Set([...(moduleState.learnedTopicIds||[]),...sessions.filter(session=>session.moduleId===moduleState.moduleId).flatMap(learnedTopics)])].filter(id=>catalogIds.has(id));
   if(learned.length!==(moduleState.learnedTopicIds||[]).length){moduleState={...moduleState,learnedTopicIds:learned};await store.write(`modules/${moduleState.moduleId}/state.json`,moduleState);}
-  sqlAI=new SQLAI(store,englishAI,()=>settings);await sqlAI.load();if(!demo&&!smoke)setTimeout(()=>void sqlAI.prepare(moduleState,sessions),2000);
+  sqlAI=new SQLAI(store,englishAI,()=>settings);await sqlAI.load();
+  if(!demo&&!smoke)sqlPrepareTimer=setTimeout(()=>{
+    if(!quitting)void sqlAI.prepare(moduleState,sessions).catch(reportBackgroundError);
+  },2000);
   const sqlChatClient=new AI.EnglishAI({statisticsPath:store.root,env:{},fetchImpl:(url:string,options:RequestInit)=>fetch(url,{...options,signal:AbortSignal.timeout(12_000)})});
   sqlChat=new SQLChat(sqlChatClient,()=>englishAI.config(),()=>settings.sqlAIFallback!==false,demo||smoke,()=>lunaModel(settings.lunaModels?.postgresql));
   warningPanel=new WarningPanel(__dirname,()=>{void snoozeDaily().catch(()=>failOpen());});
@@ -591,5 +655,5 @@ if(launchLock)void app.whenReady().then(async()=>{
     const icon=nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR42mMQ0NX8TwlmGDVg1IBRA0YNAOcGAJqEnwEiEb2gAAAAAElFTkSuQmCC');
     tray=new Tray(icon);tray.setToolTip('SQL Recall · щоденне повторення');updateTray();tray.on('double-click',showDashboard);
   }
-  await pollProgress();setInterval(()=>void tick(),1000);if(smoke)setTimeout(()=>app.quit(),12000);
+  await pollProgress();tickTimer=setInterval(scheduleTick,1000);if(smoke)setTimeout(()=>app.quit(),12000);
 }).catch(error=>{console.error(error);app.exit(1);});

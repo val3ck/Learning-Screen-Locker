@@ -13,8 +13,8 @@ export const LEARNING_TRACKS = [
   },
   {
     id: 'nodejs', title: 'Node.js', activity: 'Вивчення Node.js', defaultStart: '22:59',
-    progressLabel: 'модулів завершено', defaultMinutes: 40, minMinutes: 5, maxMinutes: 120,
-    durationHelp: 'Після цього Recall знімає повноекранний захист нічного заняття.',
+    progressLabel: 'модулів завершено', defaultMinutes: 60, minMinutes: 5, maxMinutes: 120,
+    durationHelp: 'За сесію можна завершити урок із лекцією та двома критеріями практики. Після ліміту можна зберегти частковий результат.',
   },
   {
     id:'git',title:'Git Tutor',activity:'Практика Git',defaultStart:null,

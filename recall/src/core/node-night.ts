@@ -2,7 +2,6 @@ import {defaultDuration,defaultStart,minuteMs} from './tracks';
 import {clockDue,kyivDayKey,kyivParts,type ClockTime} from './calendar';
 
 export const NIGHT_LIMIT = defaultDuration('nodejs') * minuteMs;
-const SAVE_BUFFER = 5 * 60_000;
 export type NightSection = 'lecture' | 'practice' | 'check';
 export interface NightStep {
   id: string;
@@ -14,6 +13,7 @@ export interface NightStep {
   title: string;
   criteriaDone: number;
   criteriaTotal: number;
+  criteriaRequired?: number;
   lessonsDone: number;
   lessonsTotal: number;
 }
@@ -53,19 +53,23 @@ export function nodeInvitationDay(now:Date,start:ClockTime|null):string|null {
   return clockDue(now,start)?kyivDayKey(now):null;
 }
 
-export function nextNightStep(run: NightRun, course: CourseNight, now: number): NightStep | null {
-  const candidate = course.candidate;
-  const latest = run.steps.at(-1);
-  if (run.endedAt || !latest || !run.passed.includes(latest.id) || !candidate ||
-      run.steps.length >= 3 || run.steps.some(step => step.id === candidate.id) ||
-      now + candidate.minutes * 60_000 + SAVE_BUFFER > run.deadline) return null;
-  return candidate;
+export function nightLessonGoal(run: NightRun, course: CourseNight) {
+  const step = run.steps[0];
+  const counts = course.lessonCounts?.[step.lessonId];
+  return {
+    lectureRead: course.completed.includes(step.lessonId + '/lecture'),
+    criteriaDone: counts?.criteriaDone ?? step.criteriaDone,
+    criteriaRequired: step.criteriaRequired ?? Math.min(2, step.criteriaTotal),
+    lessonDone: course.completed.includes(step.lessonId + '/check'),
+  };
 }
 
 export function reviewNightProgress(run: NightRun, course: CourseNight) {
-  const known = new Set(course.completed);
-  for (const step of run.steps) {
-    if (known.has(step.id) && !run.passed.includes(step.id)) run.passed.push(step.id);
+  const prefix = run.steps[0].lessonId + '/';
+  const criteria = course.completed.filter(id => id.startsWith(prefix + 'practice/'))
+    .slice(0, nightLessonGoal(run, course).criteriaRequired);
+  for (const id of [prefix + 'lecture', ...criteria, prefix + 'check']) {
+    if (course.completed.includes(id) && !run.passed.includes(id)) run.passed.push(id);
   }
 }
 

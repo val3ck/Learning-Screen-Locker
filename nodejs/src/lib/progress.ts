@@ -33,9 +33,10 @@ export function updateLesson(progress: Progress, id: string, update: Partial<Les
   if (!lessonById.has(id)) return progress;
   return { ...progress, lessons: { ...progress.lessons, [id]: { ...getLessonProgress(progress, id), ...update } }, lastLessonId: id };
 }
+export const requiredPracticeChecks = (lesson: Lesson) => Math.min(2, lesson.criteria.length);
 export function canComplete(progress: Progress, lesson: Lesson) {
   const p = getLessonProgress(progress, lesson.id);
-  return isUnlocked(progress, lesson) && p.quizPassed && lesson.criteria.every((_, i) => p.checks.includes(i));
+  return isUnlocked(progress, lesson) && p.read && p.checks.length >= requiredPracticeChecks(lesson);
 }
 export function completeLesson(progress: Progress, lesson: Lesson, now = new Date()): Progress {
   if (!canComplete(progress, lesson) || isComplete(progress, lesson.id)) return progress;
@@ -65,7 +66,9 @@ export function parseProgress(input: unknown): Progress {
     if (!lesson) throw new Error(`Невідомий урок у файлі: ${id.slice(0, 80)}.`);
     if (!object(raw) || typeof raw.read !== 'boolean' || typeof raw.quizPassed !== 'boolean' || typeof raw.notes !== 'string' || raw.notes.length > 20000 || !['lecture', 'practice', 'check'].includes(String(raw.step)) || !Number.isInteger(raw.reviewCount) || Number(raw.reviewCount) < 0 || Number(raw.reviewCount) > 30 || (raw.completedAt !== null && !date(raw.completedAt)) || (raw.nextReviewAt !== null && !date(raw.nextReviewAt))) throw new Error(`Пошкоджені дані уроку ${id}.`);
     const checks = indices(raw.checks, lesson.criteria.length);
-    if (raw.completedAt && (!raw.quizPassed || checks.length !== lesson.criteria.length)) throw new Error(`Завершений урок ${id} має неповну перевірку.`);
+    const lessonDone = raw.read && checks.length >= requiredPracticeChecks(lesson);
+    const legacyDone = raw.quizPassed && checks.length === lesson.criteria.length;
+    if (raw.completedAt && !lessonDone && !legacyDone) throw new Error(`Завершений урок ${id} має неповну перевірку.`);
     clean.lessons[id] = { read: raw.read, quizPassed: raw.quizPassed, notes: raw.notes, step: raw.step as Step, checks, reviewCount: Number(raw.reviewCount), completedAt: raw.completedAt as string | null, nextReviewAt: raw.nextReviewAt as string | null };
   }
   for (const [id, checks] of Object.entries(input.projects)) {

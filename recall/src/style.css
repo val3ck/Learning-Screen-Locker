@@ -31,3 +31,19 @@
 .duration-input{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px}
 .duration-input input{width:75px;padding:8px;border:1px solid #aac09e;border-radius:6px;background:#f8f9f0;color:var(--ink)}
 @media(max-height:780px){.sidebar .workspace-label{margin-top:28px}.sidebar-learning{margin-top:20px}.sidebar{padding-bottom:14px}}
+
+.track-card-section { margin-block: 28px; }
+.track-card-section > h2 { margin: 0 0 14px; font-size: 22px; }
+.track-card-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; }
+.track-card { display: flex; flex-direction: column; gap: 12px; padding: clamp(18px, 2vw, 28px); min-width: 0; }
+.track-card-symbol { display: grid; place-items: center; padding: 6px 9px; min-width: 36px; border: 1px solid #bdc9b1; border-radius: 8px; color: #27473d; font: 600 .9rem ui-monospace,monospace; }
+.track-card-schedule { color: #53674f; font-size: .82rem; text-align: end; }
+.track-card h3 { margin: 0; font-size: clamp(1.2rem,2.2vw,1.65rem); }
+.track-card > p { margin: 0 0 auto; font-size: .88rem; }
+.track-card-progress { display: grid; gap: 7px; padding: 12px; border: 1px solid #d8dfce; border-radius: 8px; background: #faf9f3; }
+.track-card-count { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.track-card-count strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.track-card-count span, .track-card-today { color: #52644c; font-size: .8rem; }
+.track-card-meter { width: 100%; height: 6px; accent-color: #617e4f; }
+.track-card .button { position: relative; z-index: 1; }
+@media (max-width: 760px) { .track-card-grid { grid-template-columns: 1fr; } }

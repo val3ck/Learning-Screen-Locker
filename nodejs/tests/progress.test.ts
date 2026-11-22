@@ -4,21 +4,26 @@ import { lessons, prerequisitesFor } from '../src/content/catalog';
 import { buildSession } from '../src/lib/session';
 import { canComplete, completeLesson, dueReviews, freshProgress, getLessonProgress, isComplete, isUnlocked, parseProgress, reviewLesson, updateLesson } from '../src/lib/progress';
 
-test('lesson unlocks only after its prerequisites and local checks', () => {
+test('a lecture and any two practice checks complete the lesson without the quiz', () => {
   const first = lessons[0], second = lessons[1];
   assert.equal(isUnlocked(freshProgress(), first), true);
   assert.deepEqual(prerequisitesFor(second), [first.id]);
   assert.equal(isUnlocked(freshProgress(), second), false);
   let progress = freshProgress();
-  progress = updateLesson(progress, first.id, { quizPassed: true, checks: first.criteria.map((_, i) => i) });
+  progress = updateLesson(progress, first.id, {checks: [0, first.criteria.length-1]});
+  assert.equal(canComplete(progress, first), false);
+  progress = updateLesson(progress, first.id, {read:true,checks:[0],quizPassed:true});
+  assert.equal(canComplete(progress, first), false);
+  progress = updateLesson(progress, first.id, {read:true,checks:[0,first.criteria.length-1],quizPassed:false});
   assert.equal(canComplete(progress, first), true);
   progress = completeLesson(progress, first, new Date('2026-11-11T12:00:00Z'));
+  assert.deepEqual(parseProgress(progress),progress);
   assert.equal(isComplete(progress, first.id), true);
   assert.equal(isUnlocked(progress, second), true);
   assert.equal(getLessonProgress(progress, first.id).nextReviewAt, '2026-11-12T12:00:00.000Z');
 });
 test('review increases interval and a forgotten lesson returns soon', () => {
-  const lesson = lessons[0]; let p = updateLesson(freshProgress(), lesson.id, { quizPassed: true, checks: lesson.criteria.map((_, i) => i) });
+  const lesson = lessons[0]; let p = updateLesson(freshProgress(), lesson.id, { read:true, checks:[0,1] });
   p = completeLesson(p, lesson, new Date('2026-11-11T00:00:00Z'));
   assert.deepEqual(dueReviews(p, new Date('2026-11-12T00:00:00Z')).map(x => x.id), [lesson.id]);
   p = reviewLesson(p, lesson.id, true, new Date('2026-11-12T00:00:00Z'));
@@ -33,6 +38,8 @@ test('progress import validates evidence and round-trips notes', () => {
   assert.throws(() => parseProgress(p), /неповну перевірку/);
   const unknown = { ...freshProgress(), lessons: { ghost: getLessonProgress(p, l.id) } };
   assert.throws(() => parseProgress(unknown), /Невідомий урок/);
+  const legacy = updateLesson(p,l.id,{read:false,quizPassed:true,checks:l.criteria.map((_,i)=>i)});
+  assert.deepEqual(parseProgress(legacy),legacy);
 });
 test('session fits requested duration and points to available lesson', () => {
   for (const minutes of [60, 90, 120] as const) {

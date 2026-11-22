@@ -55,11 +55,36 @@ async function verifyLuna(origin,menu,tab){
   })()`);
   await until(()=>site(origin,'!document.querySelector(".tutor-luna-side").hidden'),'Luna side reply');
   assert.equal(await site(origin,'document.querySelectorAll(".tutor-luna-log > div").length'),2);
-  assert.deepEqual(await site(origin,'window.recallTutorChat.preferences()'),{limit:20,minimal:false});
+  await until(async()=>{
+    const saved=await site(origin,'window.recallTutorChat.preferences()');
+    return saved?.limit===20&&saved.minimal===false;
+  },'Luna preferences saved');
   await site(origin,'document.querySelector(".tutor-luna [data-chat=clear]").click()');
   assert.equal(await site(origin,'document.querySelector(".tutor-luna-log").hidden && document.querySelector(".tutor-luna-side").hidden'),true);
 }
 const control=()=>until(()=>app.windows().find(w=>w.url()==='recall://app/browser-tutor.html'),'tutor controls');
+async function verifyLayout(offset){
+  const layout=await app.evaluate(({BrowserWindow,screen})=>{
+    const tutor=BrowserWindow.getAllWindows().find(win=>win.webContents.getURL()==='recall://app/browser-tutor.html');
+    const covers=BrowserWindow.getAllWindows().filter(win=>win.webContents.getURL()==='recall://app/cover.html');
+    const body=tutor.contentView.children.find(view=>view.webContents&&view.webContents!==tutor.webContents);
+    return {bounds:tutor.getBounds(),primary:screen.getPrimaryDisplay().bounds,content:tutor.getContentBounds(),
+      view:body.getBounds(),fullscreen:tutor.requestedFullscreen,cover:covers[0]?.getBounds()};
+  });
+  for(const key of ['x','y','width','height'])
+    assert.ok(Math.abs(layout.bounds[key]-layout.primary[key])<=2,'Fullscreen bounds '+key+' after DPI rounding');
+  assert.equal(layout.fullscreen,true);
+  assert.deepEqual(layout.view,{x:0,y:offset,width:layout.content.width,height:layout.content.height-offset});
+  assert.ok(layout.cover,'secondary display cover');
+}
+async function finishVim(origin){
+  await until(()=>site(origin,`(() => {
+    const button=document.querySelector('[data-action=finish-recall]');
+    if(button?.getClientRects().length)return /^[0-9]+:[0-9]{2}$/.test(document.querySelector('#recall-vim-clock').textContent);
+    document.querySelector('#menu-toggle').click();return false;
+  })()`),'Vim clock inside its menu');
+  await site(origin,'void document.querySelector("[data-action=finish-recall]").click()');
+}
 try{
   const dashboard=await app.firstWindow();
   await dashboard.locator('#start-git').waitFor();
@@ -67,14 +92,24 @@ try{
   assert.equal(settings.startTimes.git,null);assert.equal(settings.startTimes.vim,null);
   assert.deepEqual(settings.tracks.git,{done:0,total:22});
   assert.deepEqual(settings.tracks.vim,{done:0,total:58});
-  await app.evaluate(({BrowserWindow})=>{
+  assert.equal(await dashboard.locator('.track-card').count(),4);
+  await app.evaluate(({BrowserWindow,screen})=>{
     BrowserWindow.prototype.setKiosk=function(){};
-    BrowserWindow.prototype.setFullScreen=function(){};
+    BrowserWindow.prototype.setFullScreen=function(value){this.requestedFullscreen=value;};
     BrowserWindow.prototype.setAlwaysOnTop=function(){};
+    const showInactive=BrowserWindow.prototype.showInactive;
+    BrowserWindow.prototype.showInactive=function(){
+      if(this.webContents.getURL()!=='recall://app/cover.html')return showInactive.call(this);
+    };
+    const primary=screen.getPrimaryDisplay();
+    const bounds={x:primary.bounds.x+primary.bounds.width,y:primary.bounds.y,width:800,height:600};
+    screen.getAllDisplays=()=>[primary,{...primary,id:primary.id+999,bounds,workArea:bounds}];
   });
   await dashboard.locator('#start-git').click();
   const git=await endpoint('git'),gitControls=await control();
   await until(()=>site(git.origin,'!document.querySelector("#command")?.disabled && !!window.recallSaveTutor'),'Git editor ready');
+  await until(()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(win=>win.webContents.getURL()==='recall://app/cover.html')),'Git cover ready');
+  await verifyLayout(52);
   assert.equal(await site(git.origin,'typeof window.require'), 'undefined');
   assert.equal(await site(git.origin,'typeof window.recallTutor'), 'undefined');
   await verifyLuna(git.origin,'#menu','[data-drawer-tab="luna"]');
@@ -94,9 +129,12 @@ try{
   await dashboard.locator('#start-vim').click();
   const vim=await endpoint('vim'),vimControls=await control();
   await until(()=>site(vim.origin,'typeof window.recallSaveTutor === "function"'),'Vim editor ready');
+  await until(()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(win=>win.webContents.getURL()==='recall://app/cover.html')),'Vim cover ready');
+  await verifyLayout(0);
+  assert.equal(await vimControls.locator('#bar').isVisible(),false);
   assert.equal(await site(vim.origin,'typeof window.require'),'undefined');
   await verifyLuna(vim.origin,'#menu-toggle','[data-tab="luna"]');
-  await vimControls.getByRole('button',{name:'Зберегти й вийти'}).click();
+  await finishVim(vim.origin);
   await until(()=>vimControls.isClosed(),'Vim saved and closed');
 
   browser=await chromium.launch({channel:'msedge',headless:true});
@@ -117,7 +155,7 @@ try{
   const saved=await fetch(vim.origin+'/api/recall/progress').then(r=>r.json());
   assert.equal(saved.state.sandbox,'Browser lesson draft');
   await app.evaluate(()=>globalThis.__recallTutorExpire());
-  await resumed.getByRole('button',{name:'Зберегти й вийти'}).click();
+  await finishVim(vim.origin);
   await until(()=>resumed.isClosed(),'Vim saved and closed again');
   assert.equal((await dashboard.evaluate(()=>window.recall.trackProgress())).vim.done,1);
   console.log('PASS Git and Vim Luna tabs, /btw, clear, context, concise toggle, real Git grading, Vim browser migration and safe exit.');

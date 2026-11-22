@@ -40,6 +40,9 @@ try{
   await warning.getByRole('button',{name:'Ні (відкласти на 30 хв)',exact:true}).click();
   await warningClosed;
   const scheduleAfter=(await page.evaluate(()=>window.recall.bootstrap())).schedule;assert.deepEqual(scheduleAfter,scheduleBefore,'Preview must not change the real schedule');
+  await page.locator('#min-practice').selectOption('7');
+  await page.locator('#save-settings').click();
+  await page.getByText('Налаштування збережено.',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Сьогодні',exact:false}).click();
   await page.getByRole('button',{name:'Пара / демонстрація · 30 хв',exact:true}).click();
   const deferred=await page.evaluate(()=>window.recall.bootstrap());assert.ok(deferred.schedule.snoozedUntil>Date.now()+29*60000);
@@ -51,27 +54,32 @@ try{
   assert.ok(focusState.calls.some(c=>c[0]==='setKiosk'&&c[1]===true));assert.ok(focusState.calls.some(c=>c[0]==='setFullScreen'&&c[1]===true));assert.equal(focusState.closable,false);assert.equal(focusState.cover.closable,false);assert.equal(focusState.cover.focusable,false);assert.ok(focusState.cover.bounds.width>=800);assert.ok(focusState.cover.bounds.height>=600);
   await page.screenshot({path:'artifacts/exercise.png',fullPage:true});
   for(let index=0;index<5;index++){
+    if(index===2)await app.evaluate(()=>globalThis.__recallAdvance(6*60_000));
     const session=await page.evaluate(()=>window.recall.bootstrap().then(data=>data.activeSession));assert.ok(session);
     assert.equal(session.currentIndex,index);
     if(index===0){
       await page.getByRole('textbox',{name:'Твій SQL'}).fill('SELECT 999 AS wrong;');
       await page.getByRole('button',{name:'Перевірити ↗',exact:true}).click();
       await page.locator('#feedback.incorrect').waitFor({timeout:60000});
-      await page.locator('#hint').click();assert.ok((await page.locator('#hint-content').innerText()).includes('ПІДКАЗКА 1'));
+      await page.locator('.sql-chat-launcher').click();
+      await page.locator('#sql-chat-question').fill('Підкажи, які колонки перевірити?');
+      await page.locator('.sql-chat form button[type=submit]').click();
+      await page.locator('.sql-chat-messages').getByText('Luna · демо',{exact:true}).waitFor();
+      await page.locator('.sql-chat-close').click();
     }
     await page.getByRole('textbox',{name:'Твій SQL'}).fill(session.tasks[index].payload.solution);
     await page.getByRole('button',{name:'Перевірити ↗',exact:true}).click();
-    if(index<2){
-      await page.locator('#feedback.correct').waitFor({timeout:60000});
-      if(index===0){
-        await page.getByRole('button',{name:'Розбір і варіанти',exact:true}).click();
-        await page.locator('.solution-review .recommended').waitFor();
-        assert.ok(await page.locator('.solution-review .alternative').count()>=1);
-        await page.locator('.solution-review .alternative > summary').first().click();
-        await page.locator('.solution-review').screenshot({path:'artifacts/review-during-practice.png'});
-      }
-      await page.getByRole('button',{name:'Наступна вправа ↗',exact:true}).click();
+    await page.locator('#feedback.correct').waitFor({timeout:60000});
+    assert.equal(await page.evaluate(()=>window.recall.bootstrap().then(data=>data.activeSession?.currentIndex)),index);
+    if(index===2)await page.locator('#results .data-table').first().waitFor();
+    if(index===0){
+      await page.getByRole('button',{name:'Розбір і варіанти',exact:true}).click();
+      await page.locator('.solution-review .recommended').waitFor();
+      assert.ok(await page.locator('.solution-review .alternative').count()>=1);
+      await page.locator('.solution-review .alternative > summary').first().click();
+      await page.locator('.solution-review').screenshot({path:'artifacts/review-during-practice.png'});
     }
+    await page.locator('#next').click();
     if(index<4)await page.getByText(new RegExp(`ВПРАВА ${index+2} ІЗ`)).waitFor();
   }
   await page.getByRole('heading',{name:'Практику завершено.'}).waitFor();
