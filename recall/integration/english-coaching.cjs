@@ -1,6 +1,15 @@
 'use strict';
 const AREAS=['review','vocabulary','reading','listening','grammar','speaking','writing','practice'];
 const snapshot=answers=>JSON.stringify(answers.map(a=>[a.key,a.text]));
+function tutorAssessment(row,appliesToCurrentDraft){
+ if(!appliesToCurrentDraft)return {status:'edited'};
+ if(row.passed)return {status:'passed'};
+ const blockers=[];
+ if(row.relevance==='off_task')blockers.push('The checked answer does not address the selected task.');
+ else if(row.scores?.task<3)blockers.push(`Task fulfilment ${row.scores.task}/4, needs at least 3/4.`);
+ if(row.score<50)blockers.push(`Overall score ${row.score}/100, needs at least 50/100.`);
+ return {status:'needs_work',blockers};
+}
 function tutorContext(bundle,session,targetKey){
  if(bundle.area==='reading'&&session.lesson&&!bundle.answers.some(a=>/^reading-\d+$/.test(a.key)))bundle.answers=[...session.lesson.reading.questions.map((q,i)=>({key:'reading-'+i,task:q.openPrompt||q.prompt,options:q.options,intent:q.openPrompt?'open-response':'multiple-choice',text:session.answers['reading-'+i]||''})),...bundle.answers.filter(a=>!/^reading-\d+$/.test(a.key))];
  bundle.answers=bundle.answers.map(a=>a.options?{...a,text:/^\d+$/.test(a.text)?a.options[Number(a.text)]||'':a.text}:a);
@@ -8,7 +17,9 @@ function tutorContext(bundle,session,targetKey){
  if(targetKey&&targetKey!=='__block__'&&!bundle.answers.some(a=>a.key===targetKey))throw Error('Choose a task from this block.');
  const key=targetKey==='__block__'?null:targetKey||(bundle.answers.some(a=>a.key===session.lastAnswerKey)?session.lastAnswerKey:bundle.answers.filter(a=>a.text?.trim()).at(-1)?.key);
  const item=bundle.answers.find(a=>a.key===key),report=session.aiAssessments?.[bundle.area],row=report?.answers?.find(r=>r.key===key);let checked={};try{checked=Object.fromEntries(JSON.parse(report?.snapshot||'[]'));}catch{}
- const feedback=row?{score:row.score,passed:row.passed,scores:row.scores,summary:row.summary,corrections:row.corrections,nextStep:row.nextStep,focus:row.conclusion?.focus,rule:row.conclusion?.rule,appliesToCurrentDraft:checked[key]===item?.text,checkedAt:report.checkedAt}:session.results?.[key]?{localChoiceCheck:true,correct:session.results[key].correct,appliesToCurrentDraft:true}:undefined;
+ const current=typeof checked[key]==='string'&&checked[key]===item?.text&&!session.recordingNeedsTranscript?.[key];
+ const local=session.results?.[key];
+ const feedback=row?{score:row.score,passed:row.passed,scores:row.scores,summary:row.summary,corrections:row.corrections,nextStep:row.nextStep,focus:row.conclusion?.focus,rule:row.conclusion?.rule,appliesToCurrentDraft:current,checkedAt:report.checkedAt,...tutorAssessment(row,current)}:local&&!local.ungraded&&local.scope!=='ai'?{localChoiceCheck:true,correct:local.correct,appliesToCurrentDraft:true,status:local.correct?'passed':'needs_work'}:undefined;
  const lesson=session.lesson;const materials=lesson&&bundle.area==='reading'?{kind:'reading',text:lesson.reading.text,instruction:lesson.reading.retell,questions:lesson.reading.questions.map(q=>({prompt:q.openPrompt||q.prompt,instruction:q.instruction,targetForm:q.targetForm,options:q.options}))}:lesson&&bundle.area==='listening'?{kind:'listening',context:lesson.listening.context,catchWords:lesson.listening.catchWords,transcript:session.transcriptVisible||session.listeningUnavailable||session.listens>=1?lesson.listening.dialogue:undefined,transcriptVisible:!!(session.transcriptVisible||session.listeningUnavailable||session.listens>=1),questions:lesson.listening.questions.map(q=>({prompt:q.openPrompt||q.prompt,instruction:q.instruction,targetForm:q.targetForm,options:q.options}))}:lesson&&bundle.area==='grammar'?{kind:'grammar',explanation:lesson.grammar.explanation,context:lesson.grammar.context,questions:lesson.grammar.exercises.map(q=>({prompt:q.openPrompt||q.prompt,instruction:q.instruction,targetForm:q.targetForm}))}:undefined;
  bundle.coaching={materials,reference:item?.reference?{task:item.reference.task,text:item.reference.text,earlierAnswer:item.reference.answer}:undefined,targetKey:key||null,targetExplicit:!!targetKey&&targetKey!=='__block__',wholeBlock:targetKey==='__block__',task:item?.task,currentDraft:item?.text||'',lastCheckedDraft:typeof checked[key]==='string'?checked[key]:'',feedback};return bundle;
 }

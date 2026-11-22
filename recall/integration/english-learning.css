@@ -117,7 +117,14 @@
 @keyframes en-translator-dismiss{to{opacity:0;transform:translateY(6px) scale(.985)}}
 @media(prefers-reduced-motion:reduce){.en-translator-popup.is-closing{animation:none}}
 .en-translator-popup header button:hover{background:#e4eddc}
-.en-translator-menu .en-translate-selection+.en-translate-selection{margin-top:6px}
+.en-translator-menu .en-translator-body{display:grid;gap:6px}
+.en-synonym-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}
+.en-synonym-actions select{font:inherit;font-size:12px;padding:0 8px;border:1px solid #b6c9ab;border-radius:7px;background:#f4f8ed;color:#2b5537;cursor:pointer}
+.en-synonym-actions select:focus-visible{outline:2px solid #789e66;outline-offset:2px}
+.en-translation-alternatives li{overflow-wrap:anywhere}
+.en-grammar-mark{background:transparent;color:inherit;text-decoration:underline wavy;text-underline-offset:.23em;text-decoration-thickness:1.5px}
+.en-grammar-mark.is-uncertain{text-decoration-color:#a65314}
+.en-grammar-mark.is-error{text-decoration-color:#bd2b37}
 .en-translator-body .en-explanation-source{margin:4px 0 16px}
 .en-translator-body .en-apply-word{margin-right:8px;background:#285744;color:#fff;border-color:#285744}
 .en-dictionary-contexts{margin-top:10px}
@@ -139,7 +146,9 @@
 .en-luna-widget[hidden] { display: none; }
 .en-luna-widget { z-index: 30; }
 .en-luna-widget select { display: block; width: 100%; margin-bottom: 8px; padding: 8px 10px; border: 1px solid #b4c3b3; border-radius: 7px; background: #fcfdf9; color: inherit; font: inherit; }
-.en-luna-context { overflow-wrap: anywhere; }
+.en-luna-header { display: block; }
+.en-luna-header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.en-luna-context { overflow-wrap: anywhere; margin: 0; }
 .en-live-speaking h2 { margin-block: 10px 12px; }
 .en-live-speaking textarea { display: block; width: 100%; box-sizing: border-box; margin: 7px 0 10px; padding: 10px; border: 1px solid #a6b99f; border-radius: 8px; background: #fcfdf9; font: inherit; }
 .en-dialogue-log { display: grid; gap: 10px; max-height: min(42dvh, 380px); overflow: auto; padding: 2px 6px 2px 2px; margin: 15px 0; scrollbar-gutter: stable; }

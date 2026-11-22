@@ -5,6 +5,7 @@ import {solutionView} from './solution-view';
 import {sqlAISettings} from './sql-ai-view';
 import {SQLChatView} from './sql-chat-view';
 import {EnglishScreen} from './modules/english/view';
+import {FolderCoursesView} from './folder-courses-view';
 let englishScreen:EnglishScreen|null=null;
 import type {Bootstrap,SessionRecord,ExecutionResult,DataTable,Runner} from './core/contracts';
 import {getModule} from './modules/registry';
@@ -18,7 +19,8 @@ const sqlChat=new SQLChatView((sessionId,taskId)=>{
   void persist();
 });
 let boot:Bootstrap,session:SessionRecord|null=null,runner:Runner|null=null,busy=false,ready=false;
-let page:'home'|'session'|'statistics'|'settings'|'summary'|'paused'|'english'='home';let feedback:ExecutionResult|null=null;
+let page:'home'|'session'|'statistics'|'settings'|'summary'|'paused'|'english'|'courses'='home';let feedback:ExecutionResult|null=null;
+let folderCourses:FolderCoursesView|undefined;
 let notice='',showSolution=false,saveTimer:ReturnType<typeof setTimeout>|null=null;
 let previousTick=Date.now(),lastSavedAt=0,finishing=false;
 const escape=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -81,6 +83,8 @@ function shell(content:string){
 
   root.innerHTML=`<aside class="sidebar"><a class="brand" href="#" id="home-brand"><span class="brand-icon">r<span>_</span></span><span>recall<span class="brand-sub">ТРОХИ ПРАКТИКИ ЩОДНЯ</span></span></a><div class="workspace-label">ТВІЙ ПРОСТІР</div><nav><button class="nav-item ${page==='home'?'active':''}" id="nav-home"><span>◫</span> Сьогодні</button><button class="nav-item ${page==='english'?'active':''}" id="nav-english"><span>◈</span> English</button><button class="nav-item ${page==='statistics'?'active':''}" id="nav-stats"><span>▥</span> Історія повторень</button><button class="nav-item ${page==='settings'?'active':''}" id="nav-settings"><span>⚙</span> Налаштування</button></nav><section class="sidebar-learning" aria-labelledby="sidebar-learning-heading"><h2 id="sidebar-learning-heading">Прогрес навчання</h2><ul id="sidebar-tracks">${trackRows()}</ul></section><div class="sidebar-bottom"><span class="offline-dot"></span> Прогрес зберігається на цьому ПК<br><small>Без акаунта. Без поспіху.</small></div></aside><main class="main"><header class="topbar"><span>${page==='english'?'Your daily space for practice':'Твій щоденний простір для практики'}</span><span class="local-badge">${page==='english'?'● LOCAL PROGRESS · AI ON SUBMIT':(boot.sqlAI?.enabled?'● ЛОКАЛЬНА ПЕРЕВІРКА · AI-ЗАДАЧІ':'● ЛОКАЛЬНО Й ОФЛАЙН')}</span></header>${notice?`<div class="notice" role="status">${escape(notice)}</div>`:''}${boot.recoveryMessages.length?`<div class="notice">${boot.recoveryMessages.map(escape).join('<br>')}</div>`:''}${content}<footer><span>${page==='english'?'Small steps back to learning matter.':'Маленькі повернення до знань мають значення.'}</span><span>Recall · 1.10${boot.demo?' · ДЕМО':''}</span></footer></main>`;
   $('home-brand')?.addEventListener('click',e=>{e.preventDefault();navigate('home');});
+  $('nav-stats')?.insertAdjacentHTML('beforebegin',`<button class="nav-item ${page==='courses'?'active':''}" id="nav-courses" ${page==='courses'?'aria-current="page"':''}><span aria-hidden="true">▤</span> Курси</button>`);
+  $('nav-courses')?.addEventListener('click',()=>navigate('courses'));
   $('nav-english')?.addEventListener('click',()=>navigate('english'));$('nav-home')?.addEventListener('click',()=>navigate('home'));$('nav-stats')?.addEventListener('click',()=>navigate('statistics'));$('nav-settings')?.addEventListener('click',()=>navigate('settings'));
 }
 function navigate(next:typeof page){if(boot.activeLearningSession?.moduleId==='english'&&boot.activeLearningSession.status==='active'){page='english';render();return;}if(session&&!session.endedAt&&!session.paused){notice='Поточна сесія збережена. Спочатку заверши її або повернися до вправ.';page=session.paused?'paused':'session';render();return;}page=next;notice='';render();}
@@ -263,7 +267,10 @@ function settings(){
   $('save-settings')?.addEventListener('click',()=>void action(async()=>{await window.recall.configure({autoStart:$<HTMLInputElement>('auto-start')!.checked,sqlWarnAfter16:$<HTMLInputElement>('sql-warn-after-16')!.checked,minPracticeMinutes:Number($<HTMLSelectElement>('min-practice')!.value)});await refresh();notice='Налаштування збережено.';render();}));
 
 }
-function render(){if(englishScreen){englishScreen.dispose();englishScreen=null;}if(page==='english')englishPage();else if(page==='paused')paused();else if(page==='session')exercise();else if(page==='statistics')statistics();else if(page==='settings')settings();else if(page==='summary')summary();else home();}
+function render(){if(englishScreen){englishScreen.dispose();englishScreen=null;}if(page==='english')englishPage();else if(page==='courses'){
+  shell('<div id="folder-courses"></div>');
+  (folderCourses??=new FolderCoursesView(window.recall)).mount($('folder-courses')!);
+}else if(page==='paused')paused();else if(page==='session')exercise();else if(page==='statistics')statistics();else if(page==='settings')settings();else if(page==='summary')summary();else home();}
 function bindCourse(){$('open-course')?.addEventListener('click',()=>void action(async()=>{notice=(await window.recall.openCourse()).message;render();}));}
 function bindImport(){$('import-progress')?.addEventListener('click',()=>void action(async()=>{notice=(await window.recall.importProgress()).message;await refresh();render();}));}
 async function refresh(){boot=await window.recall.bootstrap();}
@@ -287,7 +294,7 @@ async function initialize(){
   setInterval(()=>{if(!document.body.classList.contains('focus-session')&&!document.hidden)void window.recall.trackProgress().then(syncTrackRows).catch(()=>{});},15000);
   window.recall.onEvent(event=>{if(event.type==='tick'){if(page==='english'&&event.clock&&boot.english?.run?.id===event.clock.id)englishScreen?.clock(event.clock.activeMs,!!event.active,event.clock.breakRemainingMs);else tick(!!event.active,event.clock);return;}void action(async()=>{
     if(event.type==='pause'&&session&&!session.endedAt&&page!=='english'){session.paused=true;page='paused';await persist();}
-    if(page==='settings'&&(event.type==='progress'||event.type==='schedule')){
+    if((page==='settings'||page==='courses')&&(event.type==='progress'||event.type==='schedule')){
       syncTrackRows(await window.recall.trackProgress());return;
     }
     await refresh();

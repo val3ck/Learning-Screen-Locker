@@ -9,6 +9,9 @@ export function sharedStatisticsPath(localAppData=process.env.LOCALAPPDATA||path
 }
 function executableRoot(projectRoot:string){return path.basename(projectRoot)==='app.asar'?path.resolve(projectRoot,'../..'):projectRoot;}
 function installationRoot(projectRoot:string,packaged:boolean){return packaged?path.resolve(executableRoot(projectRoot),'../..'):projectRoot;}
+export function folderCoursesPath(projectRoot:string,packaged:boolean){
+  return path.resolve(installationRoot(projectRoot,packaged),'../courses');
+}
 export function readRecallAiEnv(projectRoot:string,packaged:boolean){
   return readAiEnv(path.resolve(installationRoot(projectRoot,packaged),'..'));
 }

@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "id": "docker-compose",
+  "title": "Docker Compose за три вечори",
+  "description": "Підніми PostgreSQL і Adminer, розбери типові проблеми підключення та перевір, куди зберігаються дані.",
+  "lessons": [
+    {
+      "id": "start-stack",
+      "title": "Підняти два сервіси",
+      "body": "lessons/start-stack.md",
+      "activities": [
+        {
+          "id": "database-host",
+          "kind": "text",
+          "prompt": "Яке ім’я сервера PostgreSQL треба вказати в Adminer? Введи лише ім’я.",
+          "accepted": ["db"],
+          "feedback": "Adminer працює всередині контейнера. Шукай ключ сервісу бази під services у compose.yaml.",
+          "recall": true
+        },
+        {
+          "id": "host-port",
+          "kind": "choice",
+          "prompt": "Що означає 8080 у записі 127.0.0.1:8080:8080?",
+          "options": [
+            {"id": "linux-only", "label": "Номер порту Linux, який Windows не бачить."},
+            {"id": "host", "label": "Середнє число — порт на ПК. Останнє — порт у контейнері."},
+            {"id": "both-local", "label": "Обидва числа — порти на ПК, між якими Compose перемикається."}
+          ],
+          "answer": "host",
+          "feedback": "Проброс записується як адреса ПК, порт ПК і порт контейнера. Адреса 127.0.0.1 обмежує доступ цим комп’ютером.",
+          "recall": true
+        }
+      ]
+    },
+    {
+      "id": "debug-connection",
+      "title": "Виправити підключення",
+      "body": "lessons/debug-connection.md",
+      "activities": [
+        {
+          "id": "healthy-dependency",
+          "kind": "text",
+          "prompt": "Яке значення condition чекає, доки healthcheck бази стане успішним?",
+          "accepted": ["service_healthy"],
+          "feedback": "Шукай значення під depends_on → db → condition. Цей режим перевіряє готовність сервісу за healthcheck.",
+          "recall": true
+        },
+        {
+          "id": "inspect-database",
+          "kind": "choice",
+          "prompt": "Хочеш побачити, чи PostgreSQL повідомляє про помилки запуску. Яку команду виконаєш?",
+          "options": [
+            {"id": "db-logs", "label": "docker compose logs db"},
+            {"id": "web-logs", "label": "docker compose logs adminer"},
+            {"id": "config", "label": "docker compose config"}
+          ],
+          "answer": "db-logs",
+          "feedback": "Логи треба дивитися в сервісу, де запущено PostgreSQL. Команда config показує конфігурацію.",
+          "recall": true
+        }
+      ]
+    },
+    {
+      "id": "keep-data",
+      "title": "Перевірити збереження даних",
+      "body": "lessons/keep-data.md",
+      "activities": [
+        {
+          "id": "volume-survives",
+          "kind": "choice",
+          "prompt": "Після docker compose down запускаєш той самий проєкт через up. Де залишився тестовий запис?",
+          "options": [
+            {"id": "browser", "label": "У кеші Adminer у браузері."},
+            {"id": "container", "label": "У старому контейнері, навіть після його видалення."},
+            {"id": "volume", "label": "В іменованому томі db-data, який підключить новий контейнер."}
+          ],
+          "answer": "volume",
+          "feedback": "У Compose до каталогу даних PostgreSQL підключено іменований том. Звичайний down залишає том.",
+          "recall": true
+        },
+        {
+          "id": "stop-the-stack",
+          "kind": "text",
+          "prompt": "Напиши команду, щоб прибрати контейнери навчального проєкту і зберегти іменований том.",
+          "accepted": ["docker compose down"],
+          "feedback": "Потрібна команда, яка прибирає контейнери. Додатковий прапорець видалення томів тут не потрібен.",
+          "recall": true
+        }
+      ]
+    }
+  ]
+}

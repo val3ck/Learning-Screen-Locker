@@ -1,19 +1,26 @@
 type Selection = {text:string;context:string};
 type Provider = 'complimentary'|'openrouter'|'groq';
-type WordAction = 'correct'|'synonyms';
-type HelpAction = 'explain'|WordAction;
+const CEFR_LEVELS = ['A1','A2','B1','B2','C1','C2'] as const;
+type CefrLevel = typeof CEFR_LEVELS[number];
+type HelpRequest = Selection & (
+  | {action:'explain'|'correct'|'grammar'}
+  | {action:'synonyms';cefrLevel?:CefrLevel}
+);
+type GrammarIssue = {start:number;end:number;severity:'uncertain'|'error';reason:string};
 type Edit = {field:HTMLTextAreaElement;value:string;start:number;end:number};
 type DictionaryUse = {text:string;context:string;translation:string;explanation:string;alternatives:{text:string;when:string}[]};
 type DictionaryEntry = DictionaryUse & {uses?:DictionaryUse[]};
 export type EnglishTextRequest =
   | {action:'list'}
-  | ({action:'lookup'|HelpAction} & Selection)
+  | ({action:'lookup'} & Selection)
+  | HelpRequest
   | ({action:'translate';provider:Provider} & Selection);
 type Request = (input:EnglishTextRequest)=>Promise<any>;
 const roots=new WeakMap<HTMLElement,Request>();
 let popup:HTMLElement|null=null;
 let restoreFocus:HTMLElement|null=null;
 let dismissHandlersInstalled=false;
+let synonymLevel:CefrLevel|''='';
 const escape=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const bodyOf=(panel:HTMLElement)=>panel.querySelector<HTMLElement>('.en-translator-body')!;
 
@@ -127,21 +134,43 @@ async function lookup(request:Request,selection:Selection){
     if(popup===panel)render(result);
   }catch(error){if(popup===panel){body.replaceChildren();showError(panel,error);}}
 }
-const HELP_TITLES={explain:'What does this mean?',correct:'Correct word',synonyms:'Best synonyms'};
-async function showHelp(request:Request,action:HelpAction,selection:Selection,edit?:Edit){
-  const panel=openPanel(HELP_TITLES[action]);
+const HELP_TITLES={explain:'What does this mean?',correct:'Correct word',synonyms:'Best synonyms',grammar:'Grammar check'};
+const grammarLabel=(issue:GrammarIssue)=>issue.severity==='error'?'Grammar error':'Possible issue';
+function markedSentence(sentence:string,issues:GrammarIssue[]){
+  let offset=0;
+  let html='';
+  for(const issue of issues){
+    html+=escape(sentence.slice(offset,issue.start));
+    html+=`<mark class="en-grammar-mark ${issue.severity==='error'?'is-error':'is-uncertain'}">${escape(sentence.slice(issue.start,issue.end))}</mark>`;
+    offset=issue.end;
+  }
+  return html+escape(sentence.slice(offset));
+}
+async function showHelp(request:Request,input:HelpRequest,edit?:Edit){
+  const {action,text,context}=input;
+  const selection={text,context};
+  const level=action==='synonyms'&&input.cefrLevel;
+  const panel=openPanel(HELP_TITLES[action]+(level?' · '+level:''));
   const body=bodyOf(panel);
-  body.innerHTML='<blockquote class="en-selected-text">'+escape(selection.text)+'</blockquote><div role="status" data-en-explanation><p>Checking the selected text…</p></div><button type="button" data-explain-dictionary>Translate in Dictionary</button>';
+  const source=action==='grammar'?context:text;
+  const pending=action==='grammar'?'Checking the sentence…':'Checking the selected text…';
+  body.innerHTML='<blockquote class="en-selected-text">'+escape(source)+'</blockquote><div role="status" data-en-explanation><p>'+pending+'</p></div><button type="button" data-explain-dictionary>Translate in Dictionary</button>';
   body.querySelector<HTMLButtonElement>('[data-explain-dictionary]')!.onclick=()=>void lookup(request,selection);
   const answer=body.querySelector<HTMLElement>('[data-en-explanation]')!;
   try{
-    const result=await request({action,...selection});
+    const result=await request(input);
     if(popup!==panel)return;
     const suggestions=action==='synonyms'&&result.suggestions.length
-      ?'<ul class="en-translation-alternatives">'+result.suggestions.map((item:{word:string;reason:string})=>'<li><strong>'+escape(item.word)+'</strong><small>'+escape(item.reason)+'</small></li>').join('')+'</ul>'
+      ?'<ul class="en-translation-alternatives">'+result.suggestions.map((item:{word:string;meaning:string;usage:string})=>'<li><strong>'+escape(item.word)+'</strong><small>'+escape(item.meaning)+'</small><small><b>Use:</b> '+escape(item.usage)+'</small></li>').join('')+'</ul>'
       :'';
+    let grammar='';
+    if(action==='grammar'){
+      const issues:GrammarIssue[]=result.issues;
+      body.querySelector('blockquote')!.innerHTML=markedSentence(context,issues);
+      if(issues.length)grammar='<ul class="en-translation-alternatives en-grammar-issues">'+issues.map(issue=>`<li><small>${grammarLabel(issue)}</small><strong>${escape(context.slice(issue.start,issue.end))}</strong><small>${escape(issue.reason)}</small></li>`).join('')+'</ul>';
+    }
     answer.innerHTML=(action==='correct'?'<h3>'+escape(result.replacement)+'</h3>':'')
-      +suggestions+'<p>'+escape(result.explanation)+'</p><small class="en-explanation-source">'+escape(result.provider)+' · '+escape(result.model)+'</small>';
+      +suggestions+grammar+'<p>'+escape(result.explanation)+'</p><small class="en-explanation-source">'+escape(result.provider)+' · '+escape(result.model)+'</small>';
     if(action==='correct'&&edit&&result.replacement!==selection.text){
       const apply=document.createElement('button');
       apply.type='button';
@@ -162,8 +191,16 @@ async function showHelp(request:Request,action:HelpAction,selection:Selection,ed
     }
   }catch(error){if(popup===panel){answer.remove();showError(panel,error);}}
 }
-function localContext(source:string,text:string,start=source.indexOf(text)){
-  return start<0?text:source.slice(Math.max(0,start-650),start+text.length+650);
+const sentenceSegmenter=new Intl.Segmenter('en',{granularity:'sentence'});
+export function sentenceContext(source:string,text:string,start=source.indexOf(text)){
+  if(!text||start<0||source.slice(start,start+text.length)!==text)return text;
+  // Keep offsets while preventing false breaks after common abbreviations.
+  const boundaryText=source.replace(/\b(Mr|Mrs|Ms|Mx|Dr|Prof|e\.g|i\.e)\.(?=\s+\S)/g,'$1_');
+  const sentences=sentenceSegmenter.segment(boundaryText);
+  const first=sentences.containing(start);
+  const last=sentences.containing(start+text.length-1);
+  if(!first||!last)return text;
+  return source.slice(first.index,last.index+last.segment.length).trim();
 }
 function selectedText(root:HTMLElement,target:HTMLElement):{selection:Selection;edit?:Edit}|null{
   if(target.closest('#en-ai-settings,input,.sql-ai-settings'))return null;
@@ -172,7 +209,7 @@ function selectedText(root:HTMLElement,target:HTMLElement):{selection:Selection;
     const selected=target.value.slice(start,target.selectionEnd);
     const text=selected.trim();
     const offset=selected.indexOf(text);
-    return {selection:{text,context:localContext(target.value,selected,start)},edit:target.readOnly||target.disabled?undefined:{field:target,value:target.value,start:start+offset,end:start+offset+text.length}};
+    return {selection:{text,context:sentenceContext(target.value,text,start+offset)},edit:target.readOnly||target.disabled?undefined:{field:target,value:target.value,start:start+offset,end:start+offset+text.length}};
   }
   const selection=window.getSelection();
   if(!selection?.rangeCount)return null;
@@ -183,14 +220,14 @@ function selectedText(root:HTMLElement,target:HTMLElement):{selection:Selection;
   const common=range.commonAncestorContainer;
   const owner=(common instanceof HTMLElement?common:common.parentElement)?.closest<HTMLElement>('p,li,blockquote,fieldset,.en-reading,article')||target;
   const source=owner.textContent||'';
-  if(!owner.contains(range.startContainer))return {selection:{text,context:localContext(source,text)}};
+  if(!owner.contains(range.startContainer))return {selection:{text,context:sentenceContext(source,text)}};
   const before=document.createRange();
   before.selectNodeContents(owner);
   before.setEnd(range.startContainer,range.startOffset);
-  return {selection:{text,context:localContext(source,text,before.toString().length+selected.indexOf(text))}};
+  return {selection:{text,context:sentenceContext(source,text,before.toString().length+selected.indexOf(text))}};
 }
 export function renderTranslatorTools(){
-  return '<div class="en-dictionary-toolbar"><small>Right-click selected text for an explanation or translation.</small><button type="button" class="button secondary" data-en-dictionary-open aria-haspopup="dialog">My dictionary</button></div>';
+  return '<div class="en-dictionary-toolbar"><small>Right-click selected text for language help.</small><button type="button" class="button secondary" data-en-dictionary-open aria-haspopup="dialog">My dictionary</button></div>';
 }
 export function installContextTranslator(root:HTMLElement,request:Request){
   installDismissHandlers();
@@ -209,10 +246,22 @@ export function installContextTranslator(root:HTMLElement,request:Request){
     panel.classList.add('en-translator-menu');
     const wordActions=selection.text.length<=80&&selection.text.split(/\s+/).length<=8;
     bodyOf(panel).innerHTML='<button type="button" class="en-translate-selection" data-help-selection="explain">Explain with AI</button>'
-      +(wordActions?'<button type="button" class="en-translate-selection" data-help-selection="correct">Correct word</button><button type="button" class="en-translate-selection" data-help-selection="synonyms">Best synonyms</button>':'')
+      +'<button type="button" class="en-translate-selection" data-help-selection="grammar">Grammar check</button>'
+      +(wordActions?`<button type="button" class="en-translate-selection" data-help-selection="correct">Correct word</button>
+        <div class="en-synonym-actions"><button type="button" class="en-translate-selection" data-help-selection="synonyms">Best synonyms</button>
+        <select aria-label="Synonym level (CEFR)" data-synonym-level><option value="">Auto</option>${CEFR_LEVELS.map(level=>`<option>${level}</option>`).join('')}</select></div>`:'')
       +'<button type="button" class="en-translate-selection" data-translate-selection>Translate in Dictionary</button>';
+    const level=panel.querySelector<HTMLSelectElement>('[data-synonym-level]');
+    if(level){
+      level.value=synonymLevel;
+      level.onchange=()=>{synonymLevel=level.value as CefrLevel|'';};
+    }
     for(const button of panel.querySelectorAll<HTMLButtonElement>('[data-help-selection]')){
-      button.onclick=()=>void showHelp(roots.get(root)!,button.dataset.helpSelection as HelpAction,selection,edit);
+      button.onclick=()=>{
+        const action=button.dataset.helpSelection as HelpRequest['action'];
+        const input:HelpRequest=action==='synonyms'?{...selection,action,cefrLevel:synonymLevel||undefined}:{...selection,action};
+        void showHelp(roots.get(root)!,input,edit);
+      };
     }
     panel.querySelector<HTMLButtonElement>('[data-translate-selection]')!.onclick=()=>void lookup(roots.get(root)!,selection);
     panel.style.right='auto';

@@ -24,10 +24,12 @@ export class EnglishLunaChat {
     this.widget.hidden=true;
     this.widget.innerHTML=`<button type="button" class="sql-chat-launcher" aria-expanded="false" aria-controls="en-luna-panel">Luna</button>
       <section class="sql-chat" id="en-luna-panel" aria-labelledby="en-luna-title" hidden>
-        <header class="sql-chat-header"><h2 id="en-luna-title">Luna <span>Task help</span></h2><button type="button" class="sql-chat-close" aria-label="Close Luna chat">×</button></header>
+        <header class="sql-chat-header en-luna-header">
+          <div class="en-luna-header-row"><h2 id="en-luna-title">Luna <span>Task help</span></h2><button type="button" class="sql-chat-close" aria-label="Close Luna chat">×</button></div>
+          <label for="en-luna-target">Which task?</label><select id="en-luna-target" aria-describedby="en-luna-context"></select>
+          <p class="sql-chat-note en-luna-context" id="en-luna-context"></p>
+        </header>
         <div class="sql-chat-content">
-          <label for="en-luna-target">Which task?</label><select id="en-luna-target"></select>
-          <p class="sql-chat-note en-luna-context"></p>
           <div class="sql-chat-messages" role="log" aria-label="Luna task help" hidden></div>
           <div class="luna-btw" role="status" hidden></div>
           <form><label for="en-luna-question">Your question</label><textarea id="en-luna-question" rows="2" maxlength="${LUNA_INPUT_LIMIT}" placeholder="What should I clarify in my answer?"></textarea>
@@ -85,7 +87,7 @@ export class EnglishLunaChat {
       const key=field.dataset.enAnswer!;
       const card=field.closest('.en-prompt-card')?.querySelector('h3')?.textContent;
       const label=field.id&&this.root.querySelector(`label[for="${CSS.escape(field.id)}"]`)?.textContent;
-      options.set(key,(card||label||key).slice(0,92));
+      options.set(key,(label||card||key).trim().slice(0,92));
     }
     const selected=attempt?.lastAnswerKey;
     if(!options.has(this.autoKey))this.autoKey=typeof selected==='string'&&options.has(selected)?selected:options.keys().next().value||'';
@@ -114,7 +116,9 @@ export class EnglishLunaChat {
     log.hidden=!messages.length;
     log.scrollTop=log.scrollHeight;
     const option=[...this.select.options].find(o=>o.value===this.key());
-    this.widget.querySelector('.en-luna-context')!.textContent=option?`Context: ${option.text}`:'Context: the current block';
+    this.widget.querySelector('.en-luna-context')!.textContent=this.select.value==='auto'
+      ?`Active: ${option?.text||'Whole block'}`
+      :this.select.value==='__block__'?'Context: all tasks in this block':'Pinned to this task';
     this.widget.querySelector<HTMLButtonElement>('[type=submit]')!.disabled=this.pending;
   }
 

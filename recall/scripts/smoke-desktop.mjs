@@ -11,6 +11,18 @@ try{
   const boot=await page.evaluate(()=>window.recall.bootstrap());assert.ok(boot.settings.statisticsPath.includes('sql-recall-smoke-'));assert.equal(boot.settings.setupComplete,false);
   assert.deepEqual(Object.keys(boot.tracks),['postgresql','english','nodejs','git','vim']);
   assert.equal(await page.locator('#sidebar-tracks li').count(),5);
+  await page.getByRole('button',{name:'Курси',exact:true}).click();
+  await page.getByRole('heading',{name:'Курси',exact:true}).waitFor();
+  const pilot=(await page.evaluate(()=>window.recall.folderCourses())).courses.find(course=>course.id==='docker-compose');
+  if(pilot){
+    await page.locator('[data-open-course="docker-compose"]').click();
+    await page.getByRole('heading',{name:pilot.title,exact:true}).waitFor();
+    const question=page.locator('form[data-activity="database-host"]');
+    await question.getByRole('textbox').fill('db');
+    await question.getByRole('button',{name:'Перевірити'}).click();
+    await question.getByText('✓ Зараховано',{exact:true}).waitFor();
+    assert.equal((await page.evaluate(()=>window.recall.folderCourses())).courses.find(course=>course.id==='docker-compose').lessons[0].activities[0].passed,true);
+  }
   const preferences=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().map(w=>w.webContents.getLastWebPreferences()));
   assert.equal(preferences.length,1);assert.equal(preferences[0].nodeIntegration,false);assert.equal(preferences[0].contextIsolation,true);assert.equal(preferences[0].sandbox,true);
   assert.equal(await page.evaluate(()=>typeof window.require),'undefined');

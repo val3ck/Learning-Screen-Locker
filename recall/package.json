@@ -12,6 +12,7 @@
     "build": "node scripts/sync-english-content.mjs && npm run typecheck && vite build && node scripts/build-main.mjs",
     "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
     "test:content": "tsx --test tests/content.test.ts",
+    "courses:validate": "tsx scripts/validate-courses.ts",
     "start": "electron .",
     "demo": "electron . --demo",
     "package": "npm run build && electron-builder --win dir",

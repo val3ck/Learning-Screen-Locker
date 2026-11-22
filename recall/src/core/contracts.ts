@@ -43,6 +43,8 @@ export interface SQLChatRequest {sessionId:string;taskId:string;question:string;
 export interface SQLChatReply {answer:string;model:string;provider:string}
 export interface Bootstrap {settings:Settings; tracks:TrackProgress; startTimes:Record<TrackId,TrackStart>; module:ModuleState; sessions:SessionRecord[]; schedule:ScheduleState; demo:boolean; recoveryMessages:string[]; activeSession:SessionRecord|null; shortcutAvailable:boolean;english?:import('../modules/english/types').EnglishView;activeLearningSession?:import('./learning').LearningEnvelope|null;sqlAI?:SQLAIStatus}
 export interface DesktopAPI {
+  folderCourses():Promise<import('./folder-courses').FolderCourseLibrary>;
+  checkFolderCourse(input:import('./folder-courses').CourseSubmission):Promise<import('./folder-courses').CourseResult>;
   bootstrap():Promise<Bootstrap>;
   configure(settings:{autoStart:boolean;minPracticeMinutes?:number;sqlWarnAfter16?:boolean}):Promise<void>;
   configureLunaModels(models:Partial<Record<TrackId,LunaModel>>):Promise<void>;

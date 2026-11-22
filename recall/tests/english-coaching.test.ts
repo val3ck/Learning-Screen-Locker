@@ -2,6 +2,7 @@ import * as Course from '../src/modules/english/vendor/course';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import AI from '../integration/english-ai.cjs';import P from '../integration/english-ai-prompts.cjs';import Coaching from '../integration/english-coaching.cjs';import Translation from '../integration/english-translation.cjs';
 import {EnglishController,newEnglishDocument} from '../src/modules/english/controller';import {renderAIBlock} from '../src/modules/english/ai-view';import {scoreTone} from '../src/modules/english/answer-enhancements';
+import {sentenceContext} from '../src/modules/english/translator-view';
 const temp=()=>fs.mkdtempSync(path.join(os.tmpdir(),'recall-coaching-'));
 const feedback=(b:any)=>({answers:b.answers.map((a:any)=>({key:a.key,relevance:'on_task',scores:{task:4,grammar:3,vocabulary:3,clarity:3,coherence:3},summary:'The main point is clear.',strengths:['A relevant idea is explained.'],conclusion:{skill:'maintain',focus:'Збережи зрозумілу думку.',rule:'Пояснюй одну ідею за раз.',example:'This change saves time.',practice:'Name one useful change.',solution:'Any relevant change.'},corrections:[],nextStep:'Keep one clear main point.'})),blockOverview:{summary:'Головні думки розділу зрозумілі.',strengths:[{text:'Ти формулюєш власні думки.',answerKeys:b.blockContext.map((a:any)=>a.key)}],weaknesses:[],nextStep:'Спробуй новий контекст.'}});
 test('Tutor receives the actual reading, exact task, latest saved draft and a correctly labelled previous score',()=>{
@@ -9,6 +10,30 @@ test('Tutor receives the actual reading, exact task, latest saved draft and a co
  const b=Coaching.tutorContext(raw,s,undefined),prompt=JSON.parse(P.helpPrompt(b,'Explain the phrase in this reading.').user);assert.equal(P.locationHelp(b,"What does 'approve requirements' mean in this passage?"),null);assert.equal(prompt.coaching.materials.text,s.lesson.reading.text);assert.equal(prompt.coaching.currentDraft,s.answers.retell);assert.equal(prompt.coaching.feedback.score,65);assert.equal(prompt.coaching.feedback.appliesToCurrentDraft,false);assert.equal(prompt.coaching.lastCheckedDraft,'The old draft.');assert.ok(!JSON.stringify(prompt).includes(s.lesson.writing.model));
  assert.ok(P.validateHint({clarification:'In “I think”, you introduce your opinion.',hint:'Separate your view from the facts in the passage.',nextStep:'Choose one fact to explain.'},b));assert.throws(()=>P.validateHint({clarification:'I would explain the project like this.',hint:'Copy this.',nextStep:'Use it.'},b));assert.throws(()=>Coaching.tutorContext(raw,s,'not-a-task'));
 });
+test('Luna gets the chosen task’s pass status and real blockers even when another answer was edited last',()=>{
+ const c=new EnglishController(newEnglishDocument());c.start();const s:any=c.document.course.activeSession;
+ const answers=[{key:'vocab-0',task:'Use estimate as a verb.',text:'The developers estimate their work.'},{key:'vocab-1',task:'Use priorities and explain how the team chooses work.',text:'They have some priorities.'}];
+ s.lastAnswerKey='vocab-0';
+ s.aiAssessments={vocabulary:{snapshot:JSON.stringify(answers.map(a=>[a.key,a.text])),answers:[
+  {key:'vocab-0',score:85,passed:true,relevance:'on_task',scores:{task:4},summary:'Uses the target verb.'},
+  {key:'vocab-1',score:55,passed:false,relevance:'on_task',scores:{task:2},summary:'The answer does not explain who decides what to work on first.'},
+ ]}};
+ const ask=(key:string)=>P.helpPrompt(Coaching.tutorContext(P.context(s.lesson,'vocabulary',answers),s,key),'What should I change?');
+ const failed=JSON.parse(ask('vocab-1').user).coaching;
+ assert.equal(failed.currentDraft,'They have some priorities.');
+ assert.equal(failed.feedback.status,'needs_work');
+ assert.deepEqual(failed.feedback.blockers,['Task fulfilment 2/4, needs at least 3/4.']);
+ assert.match(failed.feedback.summary,/who decides/);
+ const passed=ask('vocab-0');
+ assert.equal(JSON.parse(passed.user).coaching.feedback.status,'passed');
+ assert.match(passed.system,/If you want to improve/);
+ answers[0].text='We estimate the work before planning.';
+ const edited=JSON.parse(ask('vocab-0').user).coaching;
+ assert.equal(edited.feedback.status,'edited');
+ assert.equal(edited.feedback.appliesToCurrentDraft,false);
+ assert.equal(edited.lastCheckedDraft,'The developers estimate their work.');
+});
+
 test('Whole-section AI conclusions include cached answers when only one response is edited',async()=>{
  const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}});ai.save({provider:'groq',key:'fake'});const contexts:any[]=[];ai.generate=async(_:string,p:any)=>{const b=JSON.parse(p.user);contexts.push(b);return feedback(b);};
  const bundle={lessonId:'test',area:'vocabulary',level:'A2',topic:'Work',sourceFacts:[],answers:[{key:'vocab-0',task:'Use feature.',text:'The new feature saves time.'},{key:'vocab-1',task:'Use role.',text:'My role is to test the app.'}]};
@@ -108,20 +133,66 @@ test('Correction and synonyms use separate requests, filter repeats, and skip in
  ai.remote=async(url:string,options:any)=>{
   assert.equal(new URL(url).hostname,'api.groq.com');
   calls++;
-  const system=JSON.parse(options.body).messages[0].content;
+  const [systemMessage,userMessage]=JSON.parse(options.body).messages;
+  const system=systemMessage.content;
+  const {context,cefrLevel}=JSON.parse(userMessage.content);
+  assert.equal(context,'The booking workflow is overcycling.');
   const content=system.includes('one replacement')
-   ?{replacement:'overcomplicating',explanation:'Use this verb for making a process more complex than necessary.'}
-   :{explanation:'These options fit the sentence.',suggestions:[{word:'complicating',reason:'Neutral wording.'},{word:'Complicating',reason:'Duplicate.'},{word:'making it harder',reason:'More conversational.'}]};
+   ?{replacement:'overcomplicated',explanation:'Use this adjective when a process is more complex than necessary.'}
+   :cefrLevel==='C1'
+    ?{explanation:'A formal option.',suggestions:[{word:'overengineered',meaning:'Designed with unnecessary complexity',usage:'When a technical design is needlessly elaborate'}]}
+    :{explanation:'This option fits the sentence.',suggestions:[{word:'too hard to follow',meaning:'Difficult to understand or use',usage:'For confusing instructions or processes'},{word:'Too hard to follow',meaning:'Difficult to follow',usage:'In conversation'}]};
   return {choices:[{message:{content:JSON.stringify(content)}}]};
  };
  const service=new Translation.EnglishTranslation({root:ai.root,ai});
- const word={text:'overcycling',context:'We are overcycling the booking workflow.'};
+ const word={text:'overcycling',context:'The booking workflow is overcycling.'};
  await assert.rejects(service.handle({action:'correct',...word}),/Enable a supported provider/);
  assert.equal(calls,0);
  ai.save({translationGroqFreeConfirmed:true});
- assert.equal((await service.handle({action:'correct',...word})).replacement,'overcomplicating');
- assert.deepEqual((await service.handle({action:'synonyms',...word})).suggestions.map((item:any)=>item.word),['complicating','making it harder']);
- assert.equal(calls,2);
+ assert.equal((await service.handle({action:'correct',...word})).replacement,'overcomplicated');
+ const request={action:'synonyms',...word,cefrLevel:'A2'};
+ const basic=await service.handle(request);
+ assert.deepEqual(basic.suggestions,[{word:'too hard to follow',meaning:'Difficult to understand or use',usage:'For confusing instructions or processes'}]);
+ assert.deepEqual((await service.handle({...request,cefrLevel:'C1'})).suggestions.map((item:any)=>item.word),['overengineered']);
+ assert.equal(await service.handle(request),basic);
+ await assert.rejects(service.handle({...request,cefrLevel:'B3'}),/Choose a CEFR level/);
+ assert.equal(calls,3);
+});
+
+test('Selection context includes the full sentence and respects the occurrence the learner selected',()=>{
+ const source='The app is live. The app still takes two seconds! Please check the logs.';
+ const selected='The app';
+ assert.equal(sentenceContext(source,selected,source.lastIndexOf(selected)),'The app still takes two seconds!');
+ assert.equal(sentenceContext(source,'seconds! Please'),'The app still takes two seconds! Please check the logs.');
+ assert.equal(sentenceContext('She asked Dr. Smith about the change. They spoke.','about'),'She asked Dr. Smith about the change.');
+ assert.equal(sentenceContext('Check the logs','logs'),'Check the logs');
+});
+
+test('Grammar checks the whole sentence and grounds severity and highlights in the original text',async()=>{
+ const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}});
+ ai.save({provider:'groq',key:'mock-key'});
+ ai.save({translationGroqFreeConfirmed:true});
+ const service=new Translation.EnglishTranslation({root:ai.root,ai});
+ const context='Every morning they checks the logs, and she checks it since last week.';
+ const input={action:'grammar',text:'the logs',context};
+ ai.remote=async(url:string,options:any)=>{
+  assert.equal(new URL(url).hostname,'api.groq.com');
+  const [system,user]=JSON.parse(options.body).messages;
+  assert.match(system.content,/Check the entire context/);
+  assert.deepEqual(JSON.parse(user.content),{selection:input.text,context});
+  const content={explanation:'Two places need attention.',issues:[
+   {fragment:'checks',occurrence:1,severity:'error',reason:'Use check after they.'},
+   {fragment:'checks it',occurrence:1,severity:'uncertain',reason:'Clarify what it refers to.'},
+   {fragment:'the report',occurrence:1,severity:'error',reason:'This fragment is absent.'},
+   {fragment:'they checks',occurrence:1,severity:'uncertain',reason:'Overlaps with a definite error.'}
+  ]};
+  return {choices:[{message:{content:JSON.stringify(content)}}]};
+ };
+ const result=await service.handle(input);
+ assert.deepEqual(result.issues,[
+  {start:context.indexOf('checks'),end:context.indexOf('checks')+6,severity:'error',reason:'Use check after they.'},
+  {start:context.lastIndexOf('checks'),end:context.lastIndexOf('checks')+9,severity:'uncertain',reason:'Clarify what it refers to.'}
+ ]);
 });
 
 test('English lesson blocks keep course instructions in English for all 84 lessons and localise saved task text',()=>{

@@ -36,7 +36,8 @@ import EnglishInstaller from '../integration/install-english.cjs';
 import {WarningPanel} from './warning-panel';
 import {FocusGuard} from './focus-guard';
 import {NodeNight} from './node-night';
-import {sharedStatisticsPath,resolveCoursePath,resolveEnglishPath,resolveNodePath,resolveBrowserTutorPath,readRecallAiEnv,legacyStatisticsRoots,configureCourseStorage} from './locations';
+import {sharedStatisticsPath,resolveCoursePath,resolveEnglishPath,resolveNodePath,resolveBrowserTutorPath,readRecallAiEnv,legacyStatisticsRoots,configureCourseStorage,folderCoursesPath} from './locations';
+import {FolderCourseLibrary} from './folder-courses';
 import {migrateLegacyStatistics} from './migrate';
 const demo=process.argv.includes('--demo');
 const smoke=process.argv.includes('--smoke');
@@ -280,6 +281,9 @@ async function openCourse(){
 }
 async function installHandlers(){
   const handle=(name:string,handler:(...args:any[])=>unknown)=>ipcMain.handle(name,(event,...args)=>{const allowedWarning=['recall:warning-status','recall:snooze','recall:start-now'].includes(name)&&event.sender===warningPanel?.window?.webContents;if(event.sender!==window?.webContents&&!allowedWarning)throw new Error('Невідоме вікно.');return handler(...args);});
+  const courses=new FolderCourseLibrary(folderCoursesPath(projectRoot,app.isPackaged),store);
+  handle('recall:folder-courses',()=>courses.list());
+  handle('recall:folder-course-check',input=>courses.submit(input));
   handle('recall:bootstrap',bootstrap);
   handle('recall:track-progress',trackProgress);
   handle('recall:configure-luna-models',async (value:Record<string,unknown>)=>{
