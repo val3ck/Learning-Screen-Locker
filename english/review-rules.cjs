@@ -34,5 +34,43 @@ function classify(c){if(byId(c.ruleId))return c.ruleId;const a=normal(c.original
 function rank(observations,results,now=new Date(),rules=RULES){
  return rules.map(rule=>{const all=observations.filter(e=>e.ruleId===rule.id),recent=all.filter(e=>now-new Date(e.at)<=30*86400000),episodes=new Set(recent.filter(e=>e.result==='incorrect').map(e=>e.episodeId));const lastFailure=Math.max(0,...all.map(o=>Date.parse(o.at)||0),...results.filter(r=>r.ruleId===rule.id&&!r.correct).map(r=>Date.parse(r.at)||0));const successes=independent(results.filter(r=>r.ruleId===rule.id&&r.correct&&!r.assisted&&!r.skipped&&Date.parse(r.at)>lastFailure)),days=new Set(successes.map(r=>r.day||r.at.slice(0,10))),maintained=successes.length>=3&&days.size>=2;const latest=successes.at(-1),due=!latest||now-new Date(latest.at)>=([1,3,7,14,30][Math.min(4,Math.floor(successes.length/3))])*86400000;return {...rule,count:episodes.size,total:new Set(all.filter(e=>e.result==='incorrect').map(e=>e.episodeId)).size,maintained,due,evidence:all.filter(e=>e.result==='incorrect').slice(-3),priority:(episodes.size>=2&&!maintained?10000:!maintained&&due&&new Set(all.map(o=>o.episodeId)).size>=2?2000:0)+(!maintained?episodes.size*100:0)+(due&&successes.length?50:0)};}).filter(r=>r.total||results.some(x=>x.ruleId===r.id)).sort((a,b)=>b.priority-a.priority||b.count-a.count||a.id.localeCompare(b.id));
 }
-function closedTask(rule,index=0){const q=rule.items[index%rule.items.length];return {kind:'grammar',ruleId:rule.id,prompt:q[0],instruction:'Type ONE word. '+(rule.id==='articles-a-an'?'Choose A or AN.':rule.id==='articles-the'?'Choose A or THE.':rule.id==='possessives'?"Choose ITS / IT’S or THEIR / THEY’RE.":rule.id==='prepositions-time'?'Choose IN, ON or AT.':/^(am|is|are)$/i.test(q[1])?'Use AM, IS or ARE.':rule.id==='word-order'&&/^(do|does)$/i.test(q[1])?'Use DO or DOES.':'Use '+(rule.id==='plural-agreement'?q[1]:q[2]||q[1]).toUpperCase()+'.'),answer:q[1],accepted:[q[1]],title:rule.title,rule:rule.rule,contrast:rule.contrast};}
-module.exports={independent,RULES,byId,normal,classify,rank,closedTask};
+
+function closedTask(rule, index=0) {
+  const [prompt,answer,distractor]=rule.items[index%rule.items.length];
+  const alternatives=distractor?[answer,distractor]:['is','are'];
+  const options=[...alternatives].sort((a,b)=>a.localeCompare(b));
+  const length=options.some(option=>option.includes(' '))?'word or phrase':'word';
+  return {
+    kind:'grammar',ruleId:rule.id,prompt,
+    instruction:'Fill the blank. Type only the missing '+length+' ('+options.join(' or ')+').',
+    answer,accepted:[answer],title:rule.title,rule:rule.rule,contrast:rule.contrast,
+  };
+}
+const productionPrompts={
+  'present-simple-s':['Describe what one person does every morning. Use a singular subject and a Present Simple verb ending in -s or -es.'],
+  'plural-agreement':['Describe something two or more people regularly do together. Use a plural subject and the base form of the verb.'],
+  'be-form':['Describe how you feel today. Start with “I am”.','Describe how two people feel today. Use “are”.'],
+  'passive-be':['Describe how something is checked or cleaned regularly. Start with the thing receiving the action and use “is” plus a past participle.'],
+  'present-continuous':['Say what someone is doing right now. Use “is” or “are” plus an -ing verb.'],
+  'past-simple':['Say what you finished yesterday. Use a Past Simple verb and a past time expression.'],
+  'articles-a-an':['Say what new thing you need. Put “a” or “an” before one singular countable noun.'],
+  'articles-the':['Ask someone to open a particular file. Use “the” and describe which file you mean in the same sentence.'],
+  'possessives':['Describe something that belongs to a company or team. Use “its” before the thing it owns.','Describe something two people own together. Use “their” before the thing they own.','Give your opinion of a tool. Start with “It’s” to mean “It is”.','Say how two people feel now. Start with “They’re” to mean “They are”.'],
+  'prepositions-time':['Tell a friend what time you will meet. Use “at” before the time.','Tell a friend what day you will meet. Use “on” before the day.','Say in which month an event happens. Use “in” before the month.'],
+  'word-order':['Ask a question about a friend’s routine. Start with “Does” and use the base form of the main verb.'],
+  'countable-plural':['Say what two or more things you need. Use a number and the plural form of a countable noun.'],
+};
+function productionTask(rule,index=0){
+  const prompts=productionPrompts[rule.id], evidence=rule.evidence?.at(-1);
+  const prompt=prompts?.[index%prompts.length]||
+    (evidence?.replacement
+      ?'Use the same language rule as in the corrected phrase “'+evidence.replacement.slice(0,160)+'” in a new situation.'
+      :'Apply this rule to a new situation: '+rule.rule.slice(0,300));
+  return {kind:'production',ruleId:rule.id,title:rule.title,rule:rule.rule,contrast:rule.contrast,
+    prompt,instruction:rule.id==='word-order'?'Write one complete English question.':'Write one complete English sentence.'};
+}
+function clarifyTask(task){
+  if(task.done||task.kind!=='production'||!/^Demonstrate this point CORRECTLY/.test(task.prompt))return task;
+  return {...task,...productionTask(byId(task.ruleId)||{...task,id:task.ruleId},task.index)};
+}
+module.exports={independent,RULES,byId,normal,classify,rank,closedTask,productionTask,clarifyTask};

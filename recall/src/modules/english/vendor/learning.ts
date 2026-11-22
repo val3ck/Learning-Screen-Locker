@@ -411,7 +411,7 @@ probe|A limited check used to test whether a service has recovered.`.split('\n')
     return true;
   }
   function writingBrief(lesson){if(lesson.writing?.brief){const b=lesson.writing.brief;return {...b,task:'Write a '+b.format+' to '+b.recipient+(lesson.communication?.allowOwnScenario?'. Use the practical workflow below, or keep your own coherent situation about this topic.':'. Use the practical workflow scenario below.')};}const c=lesson.communication;if(!c)return null;const format=lesson.writing.prompt.match(/Write a (.+?) about /)?.[1]||'short work message',purpose=format==='handover note'?'A handover note helps the teammate taking over this work.':format==='PR comment'?'A PR comment explains the change to its reviewer.':format==='incident update'?'An incident update tells the team what happened and what happens next.':'A Slack update helps the team understand the current work.';const advanced=lesson.progressionStage>=2;return {format,purpose,recipient:format==='PR comment'?'the reviewer':format==='handover note'?'the teammate taking over this work':'your team',situation:c.scene+' '+c.problem,proposal:c.proposal,alternative:c.alternative,task:'Write a '+format+' to '+(format==='PR comment'?'the reviewer':format==='handover note'?'the teammate taking over this work':'your team')+(c.allowOwnScenario?'. Use the situation below, or keep your own coherent situation about this topic.':'. Use the situation below.'),requirements:advanced?['Recommend an approach for this specific problem and explain why.','Compare it with the alternative and acknowledge one reasonable objection.','Say what evidence or result would make you reconsider.']:['Describe the current problem in this situation.','Say what should happen next and why; you may support the proposal or suggest another action.','Name ONE detail, question or result that still needs checking. You may propose a sensible check.']};}
-  function rawAreaItems(session,area){const l=session.lesson;if(area==='review')return session.reviews.map((r,i)=>({key:'review-'+i,task:r.prompt+' Instructions: '+(r.instruction||'')+' Context: '+(r.context||r.explanation),intent:r.reviewIntent,requiredWord:r.reviewIntent==='vocabulary'?r.answer:undefined,practiceAnswer:r.reviewIntent==='guided-practice'?r.answer:undefined,reference:r.sourceReference||undefined}));if(area==='vocabulary')return [...l.vocabulary.map((w,i)=>({key:'vocab-'+i,task:(w.conceptPrompt||'Write your own sentence using '+w.en+' naturally.')+' Meaning: '+w.definition})),...(session.answers['vocab-example']?.trim()?[{key:'vocab-example',task:'Explain your own situation using at least two of this lesson’s words.'}]:[])];if(area==='reading'){const legacyChoice=l.reading.questions.every((_,i)=>/^\d+$/.test(session.answers?.['reading-'+i]||'')&&session.results?.['reading-'+i]?.correct&&session.results?.['reading-'+i]?.scope!=='ai');const qItems=legacyChoice?[]:l.reading.questions.map((q,i)=>({key:'reading-'+i,task:(q.openPrompt||q.prompt)+(q.instruction?' Instructions: '+q.instruction:'')+(q.targetForm?' Target structure: '+q.targetForm:'')}));return [...qItems,{key:'retell',task:l.reading.retell}];}if(area==='speaking'){const sc=l.speaking.scenario,frames=(l.speaking.frames||[]).map(f=>f.phrase).join(' | '),mainTask=sc?sc.layerTitle+'. '+sc.context+' Task: '+sc.task+' Cover: '+sc.pointsToCover.join(' ')+(frames?' Recommended native speaking forms: '+frames:''):l.speaking.prompt;const reference={kind:'earlier-work',title:l.title,task:mainTask,answer:session.answers.monologue||''};return [{key:'monologue',task:mainTask,responseMode:session.sources?.monologue==='voice'?'speech-transcript':'typed'},...l.speaking.questions.map((q,i)=>({key:'turn-'+i,task:q,reference,responseMode:session.sources?.['turn-'+i]==='voice'?'speech-transcript':'typed'})),{key:'retry',task:'Give a shorter, clearer version of your main point in your own words.',reference,responseMode:session.sources?.retry==='voice'?'speech-transcript':'typed'}];}if(area==='writing'){const b=writingBrief(l),frames=(l.writing?.frames||[]).map(f=>f.phrase).join(' | ');return [{key:'writing',task:b?b.task+(l.communication?.allowOwnScenario?' Optional source situation: ':' Situation: ')+b.situation+(b.proposal?' Colleague proposes: '+b.proposal:'')+' Required: '+b.requirements.join(' ')+(l.progressionStage>=2&&b.alternative?' Alternative: '+b.alternative:'')+(frames?' Recommended native writing forms: '+frames:''):l.writing.prompt}];}if(area==='grammar'||area==='listening')return (area==='grammar'?l.grammar.exercises:l.listening.questions).map((q,i)=>({key:area+'-'+i,task:(q.openPrompt||q.prompt)+(q.instruction?' Instructions: '+q.instruction:'')+(q.targetForm?' Target grammar/form: '+q.targetForm:''),targetForm:q.targetForm,intent:q.openPrompt?'open-response':'multiple-choice',options:q.options}));throw Error('Unknown assessment area.');}
+  function rawAreaItems(session,area){const l=session.lesson;if(area==='review')return session.reviews.map((r,i)=>({key:'review-'+i,task:r.prompt+' Instructions: '+(r.instruction||'')+' Context: '+(r.context||r.explanation),intent:r.reviewIntent,requiredWord:r.reviewIntent==='vocabulary'?r.answer:undefined,practiceAnswer:r.reviewIntent==='guided-practice'?r.answer:undefined,reference:r.sourceReference||undefined}));if(area==='vocabulary')return [...l.vocabulary.map((w,i)=>({key:'vocab-'+i,task:(w.conceptPrompt||'Write your own sentence using '+w.en+' naturally.')+' Meaning: '+w.definition})),...(session.answers['vocab-example']?.trim()?[{key:'vocab-example',task:'Explain your own situation using at least two of this lesson’s words.'}]:[])];if(area==='reading'){const legacyChoice=l.reading.questions.every((_,i)=>/^\d+$/.test(session.answers?.['reading-'+i]||'')&&session.results?.['reading-'+i]?.correct&&session.results?.['reading-'+i]?.scope!=='ai');const qItems=legacyChoice?[]:l.reading.questions.map((q,i)=>({key:'reading-'+i,task:(q.openPrompt||q.prompt)+(q.instruction?' Instructions: '+q.instruction:'')+(q.targetForm?' Target structure: '+q.targetForm:'')}));return [...qItems,{key:'retell',task:l.reading.retell}];}if(area==='speaking'){const sc=l.speaking.scenario,frames=(l.speaking.frames||[]).map(f=>f.phrase).join(' | '),mainTask=sc?sc.layerTitle+'. '+sc.context+' Task: '+sc.task+' Cover: '+sc.pointsToCover.join(' ')+(frames?' Recommended native speaking forms: '+frames:''):l.speaking.prompt;const reference={kind:'earlier-work',title:l.title,task:mainTask,answer:session.answers.monologue||''};return [{key:'monologue',task:mainTask,responseMode:session.sources?.monologue==='voice'?'speech-transcript':'typed'},...l.speaking.questions.map((q,i)=>({key:'turn-'+i,task:q,reference,responseMode:session.sources?.['turn-'+i]==='voice'?'speech-transcript':'typed'})),{key:'retry',task:'Give a shorter, clearer version of your main point in your own words.',reference,responseMode:session.sources?.retry==='voice'?'speech-transcript':'typed'}];}if(area==='writing'){const b=writingBrief(l),frames=(l.writing?.frames||[]).map(f=>f.phrase).join(' | ');return [{key:'writing',task:b?b.task+(l.communication?.allowOwnScenario?' Optional source situation: ':' Situation: ')+b.situation+(b.proposal?' Colleague proposes: '+b.proposal:'')+' Required: '+b.requirements.join(' ')+(l.progressionStage>=2&&b.alternative?' Alternative: '+b.alternative:'')+(frames?' Recommended native writing forms: '+frames:''):l.writing.prompt}];}if(area==='grammar'||area==='listening')return (area==='grammar'?l.grammar.exercises:l.listening.questions).map((q,i)=>({key:area+'-'+i,task:(q.openPrompt||q.prompt)+(q.instruction?' Instructions: '+q.instruction:'')+(q.targetForm?' Target grammar/form: '+q.targetForm:'')+(area==='grammar'&&l.grammar.context?' Case for this block: '+l.grammar.context:''),targetForm:q.targetForm,intent:q.openPrompt?'open-response':'multiple-choice',options:area==='grammar'&&q.openPrompt?undefined:q.options}));throw Error('Unknown assessment area.');}
   const COACHING_SKILLS=['task-detail','concrete-example','agreement','verb-form','articles','possessives','word-choice','sentence-structure','linking','maintain','other'];
   function validConclusion(c){return !!c&&COACHING_SKILLS.includes(c.skill)&&['focus','rule','example','practice','solution'].every(k=>typeof c[k]==='string'&&c[k].trim()&&c[k].length<=900)&&(c.nextPractice===undefined&&c.nextSolution===undefined||['nextPractice','nextSolution'].every(k=>typeof c[k]==='string'&&c[k].trim()&&c[k].length<=900)&&c.nextPractice.trim()!==c.practice.trim());}
   function validBlockConclusion(c){return !!c&&(c.summary===undefined||typeof c.summary==='string'&&c.summary.length<=1600)&&(c.nextStep===undefined||typeof c.nextStep==='string'&&c.nextStep.length<=800)&&(c.source===undefined||['ai','derived'].includes(c.source))&&(c.weaknesses===undefined||Array.isArray(c.weaknesses)&&c.weaknesses.length<=2&&c.weaknesses.every(p=>p&&typeof p.text==='string'&&p.text.length<=700&&Array.isArray(p.answerKeys)&&p.answerKeys.length<=10&&p.answerKeys.every(k=>typeof k==='string'&&k.length<=150)))&&c.version===1&&Number.isInteger(c.passed)&&Number.isInteger(c.total)&&c.total>=1&&c.total<=10&&c.passed>=0&&c.passed<=c.total&&Array.isArray(c.strengths)&&c.strengths.length<=2&&c.strengths.every(x=>typeof x==='string'&&x.length<=700)&&Array.isArray(c.priorities)&&c.priorities.length<=2&&c.priorities.every(x=>validConclusion(x)&&typeof x.key==='string'&&x.key.length<=150&&Array.isArray(x.answerKeys)&&x.answerKeys.length<=10&&x.answerKeys.every(k=>typeof k==='string'&&k.length<=150));}
@@ -428,6 +428,110 @@ probe|A limited check used to test whether a service has recovered.`.split('\n')
 
   function recordMistakes(session,reports){const items=[...(session.mistakeLog||[])];for(const report of reports)for(const row of report.answers||[])for(const c of row.corrections||[]){if(c.kind!=='error')continue;const entry={key:row.key,original:c.original,replacement:c.replacement,explanation:c.explanation,at:report.checkedAt};const old=items.find(x=>x.key===entry.key&&x.original===entry.original&&x.replacement===entry.replacement);if(old)Object.assign(old,entry);else items.push(entry);}session.mistakeLog=items.slice(-200);}
   function acceptAssessment(session,a){if(!validAssessment(a)||!['review','vocabulary','reading','listening','grammar','speaking','writing'].includes(a.area)||typeof a.provider!=='string'||typeof a.model!=='string'||!Array.isArray(a.answers)||a.answers.some(r=>typeof r.key!=='string'||typeof r.passed!=='boolean'||!Number.isFinite(r.score)))throw Error('Invalid AI assessment.');const b=assessmentBundle(session,a.area);if(a.snapshot!==JSON.stringify(b.answers.map(r=>[r.key,r.text])))throw Error('These answers changed during assessment. Submit the current draft again.');if(a.answers.length!==b.answers.length||a.answers.some(r=>!b.answers.some(x=>x.key===r.key)))throw Error('Incomplete AI assessment.');recordMistakes(session,[...Object.values(session.aiAssessments||{}),a]);session.aiLastScores??={};if(typeof session.aiLastScores[a.area]==='number')a.previousScore=session.aiLastScores[a.area];session.aiLastScores[a.area]=a.score;session.aiAssessments??={};const previous=session.aiAssessments[a.area];if(previous&&previous.snapshot!==a.snapshot){session.coachingHistory=[...(session.coachingHistory||[]),{area:previous.area,at:previous.checkedAt,conclusion:previous.conclusion,answers:previous.answers.map(r=>({key:r.key,summary:r.summary,conclusion:r.conclusion}))}].slice(-20);}session.aiAssessments[a.area]=a;for(const r of a.answers){if(r.cached&&session.results[r.key]?.scope==='ai'&&session.results[r.key]?.correct===r.passed)continue;const assisted=!!session.revealed?.[r.key]||!!session.aiHints?.some(h=>h.area===a.area&&h.kind!=='navigation')||session.attempts.some(t=>t.key===r.key&&!t.correct&&!t.ungraded);session.results[r.key]={correct:r.passed,assisted,scope:'ai',at:a.checkedAt};session.attempts.push({key:r.key,answer:session.answers[r.key],correct:r.passed,assisted,scope:'ai',at:a.checkedAt,provider:a.provider,score:r.score,cached:!!r.cached});}return a;}
+
+
+  // Topic facts come from the lesson. The action, form and example on each
+  // card belong to the same grammar exercise.
+  const GRAMMAR_PRODUCTION = [
+    [
+      ['Describe one thing a component does regularly.', 'Singular subject + present verb ending in -s or -es.', 'The payroll system sends a report every Friday.'],
+      ['Ask a colleague how one component works.', 'How does + singular subject + base verb?', 'How does the library check a returned book?'],
+      ['Describe one thing your team regularly does.', 'We + base verb in the Present Simple.', 'We check the lights before each show.'],
+      ['Say one thing a component never does as part of its normal behaviour.', 'Singular subject + does not + base verb.', 'The lift does not open between floors.'],
+    ],
+    [
+      ['Report one change the team completed yesterday.', 'Past Simple, with a finished time such as yesterday.', 'We repaired the heater yesterday.'],
+      ['Ask why a problem happened during an earlier change.', 'Why did + subject + base verb?', 'Why did the printer stop after the update?'],
+      ['Describe one action you finished during a specific past investigation.', 'Past Simple with a finished time.', 'I inspected the wiring last night.'],
+      ['Say what the team left unchanged during a finished update.', 'Subject + did not + base verb.', 'We did not move any shelves during the renovation.'],
+    ],
+    [
+      ['Report a release or incident that happened at a specific past time.', 'Past Simple with a finished time.', 'The lift stopped at six yesterday.'],
+      ['Tell your team about a completed fix that matters now.', 'Have or has + past participle to describe a current result.', 'We have repaired the entrance, so visitors can use it again.'],
+      ['Ask if a colleague has completed a check yet.', 'Have you + past participle + yet?', 'Have you called the electrician yet?'],
+      ['Describe a finished event and say exactly when it happened.', 'Past Simple with a specific past time.', 'The library reopened last Monday.'],
+    ],
+    [
+      ['Politely ask a colleague what an endpoint or tool returns.', 'Could you explain what + subject + verb?', 'Could you explain what this gauge measures?'],
+      ['Ask directly what a status, field, or message means.', 'What does + subject + base verb?', 'What does this warning light mean?'],
+      ['Ask a colleague why an earlier request or check failed.', 'Do you know why + subject + past verb?', 'Do you know why the alarm went off?'],
+      ['Politely ask a colleague to show you one example.', 'Could you + base verb?', 'Could you show me a completed receipt?'],
+    ],
+    [
+      ['Compare two approaches by saying which uses a smaller number of requests or operations.', 'Fewer + a plural countable noun.', 'The new schedule needs fewer buses.'],
+      ['Compare two approaches by saying which uses a smaller amount of memory, time, or storage.', 'Less + an uncountable noun.', 'The new lamp uses less electricity.'],
+      ['Compare the speed of two operations.', 'Faster than + the thing you are comparing it with.', 'The express train is faster than the local train.'],
+      ['Name one cost that increases with the proposed change.', 'More + adjective to make a comparison.', 'The premium filter makes maintenance more expensive.'],
+    ],
+    [
+      ['Tell your teammate what a component is doing right now.', 'Is or are + verb ending in -ing.', 'The machines are printing labels right now.'],
+      ['Describe what a component usually does.', 'Present Simple for a regular action.', 'The timer usually sounds at noon.'],
+      ['Give a short update about work your team is doing at this moment.', 'We are + verb ending in -ing.', 'We are checking the fire alarm at the moment.'],
+      ['Describe what normally happens after a user action or recurring event.', 'Present Simple for a repeated result.', 'The light turns on after every reset.'],
+    ],
+    [
+      ['Describe one possible effect if a real condition is met.', 'If + Present Simple, then can + base verb.', 'If the weather gets colder, the pipes can freeze.'],
+      ['Explain when two independent operations can be run together.', 'If + Present Simple, then can + base verb.', 'If the ovens are free, we can bake both trays at once.'],
+      ['Say when the next step will begin.', 'Will + base verb, then when + Present Simple.', 'We will restart when the signal returns.'],
+      ['Say what the team must do if an operation fails.', 'If + Present Simple, then must + base verb.', 'If the alarm stops, we must check the battery.'],
+    ],
+    [
+      ['Explain why your team made one design decision.', 'Because + subject + verb.', 'We chose a smaller room because fewer people were coming.'],
+      ['Acknowledge one benefit and mention a drawback in the same sentence.', 'Although + subject + verb, followed by the main point.', 'Although the road is shorter, it gets busy at noon.'],
+      ['Name one concrete cause of a delay or failure.', 'Because of + a noun or noun phrase.', 'The concert started late because of a power cut.'],
+      ['Give one advantage and then qualify it with a limitation.', 'Join two complete ideas with “; however,”.', 'The new route is shorter; however, it costs more.'],
+    ],
+    [
+      ['Suggest one possible cause of a problem you have not confirmed.', 'Might + base verb.', 'The clock might need a new battery.'],
+      ['Recommend one check before the team draws a conclusion.', 'Should + base verb.', 'We should measure the doorway before ordering a frame.'],
+      ['Say what one result cannot prove on its own.', 'A singular result + does not + base verb.', 'One dry day does not prove that the roof is fixed.'],
+      ['Suggest what two observations could be connected to.', 'Could be + an adjective or a past participle.', 'The two delays could be related to roadworks.'],
+    ],
+    [
+      ['Describe how one thing is routinely produced or processed.', 'Singular subject + is + past participle.', 'The bread is baked every morning.'],
+      ['Describe what happened to one item in a finished rollout.', 'Singular subject + was + past participle.', 'The old display was replaced on Tuesday.'],
+      ['Describe how several items are routinely collected or handled.', 'Plural subject + are + past participle.', 'The tickets are scanned at the door.'],
+      ['Report what was done to one system or artefact, and give a past time.', 'Singular subject + was + past participle.', 'The main entrance was painted yesterday.'],
+    ],
+    [
+      ['State one action that is forbidden in this system.', 'Must not + base verb.', 'Visitors must not touch the equipment.'],
+      ['Say which permission or step someone can do without.', 'Do not have to or does not have to + base verb.', 'Guests do not have to register for the free event.'],
+      ['State one check the system is required to perform.', 'Must + base verb.', 'Every driver must check the tyres before leaving.'],
+      ['Recommend one safety or recovery check.', 'Should + base verb.', 'We should test the spare key once a month.'],
+    ],
+    [
+      ['Imagine one change to the system and predict its consequence.', 'If + Past Simple, then would + base verb.', 'If the shop opened earlier, more people would visit.'],
+      ['Imagine a failure and describe one possible consequence.', 'If + Past Simple, then might + base verb.', 'If the freezer stopped, the food might spoil.'],
+      ['Explain how one action could reduce a risk.', 'By + verb ending in -ing to explain how.', 'We could prevent mix-ups by labelling every box.'],
+      ['Say how the design would change under a different assumption.', 'Would + base verb, followed by if + Past Simple.', 'The room would feel larger if we moved the shelves.'],
+    ],
+  ];
+
+  function clarifyGrammar(lesson, sourceLesson) {
+    const grammar = lesson.grammar;
+    if(lesson.curriculumVersion!==2 || grammar.productionVersion===1)return false;
+    const specs = GRAMMAR_PRODUCTION[lesson.week-1];
+    if(!specs)return false;
+    const context = grammar.context || sourceLesson?.grammar.context ||
+      [lesson.concept?.caseStudy?.scene,lesson.concept?.caseStudy?.problem].filter(Boolean).join(' ');
+    if(context)grammar.context=context;
+    grammar.exercises.forEach((q,i)=>{
+      const spec=specs[i];
+      if(!spec)return;
+      const [openPrompt,targetForm,example]=spec, question=/^(?:Politely )?ask /i.test(openPrompt);
+      Object.assign(q,{
+        openPrompt,targetForm,example,
+        responseKind:question?'question':'sentence',
+        instruction:(question?'Write one complete question.':'Write one complete sentence.')+
+          (context?' Use the case above or your own example on the same topic.':' Use an example related to this lesson.'),
+      });
+      // The saved gap question still has its own answer and explanation.
+      // The writing task uses the form and example specified above.
+      delete q.hint;
+    });
+    grammar.productionVersion=1;
+    return true;
+  }
 
   const containsCyrillic=value=>typeof value==='string'&&/\p{Script=Cyrillic}/u.test(value);
   function englishLessonPrompts(lesson,sourceLesson){
@@ -452,7 +556,7 @@ probe|A limited check used to test whether a service has recovered.`.split('\n')
       if(containsCyrillic(q.instruction)){q.instruction=source?.instruction||'Write one complete English sentence using the target grammar pattern.';changed=true;}
       if(containsCyrillic(q.hint)){q.hint=source?.hint||q.explanation+' Model form: '+model;changed=true;}
     }
-    return changed;
+    return clarifyGrammar(lesson,sourceLesson)||changed;
   }
   function englishLesson(input){
     const lesson=JSON.parse(JSON.stringify(input)),stage=Math.floor((lesson.week-1)/3),grammar=GRAMMAR[lesson.week-1]||GRAMMAR[0];

@@ -2,7 +2,7 @@ import type {LearningEnvelope} from '../../core/learning';
 import type {SpeakingDialogue} from './dialogue';
 export type EnglishSpeechRequest={kind:'word'|'catch-word';index:number}|{kind:'dialogue'|'model'|'luna-reply'};
 export interface EnglishSpeechAudio {base64:string;mime:'audio/wav';voice:string;language:string;provider?:string;fallbackReason?:string}
-export interface EnglishChoice {prompt:string;options:string[];correct:number;explanation:string;id?:string;openPrompt?:string;instruction?:string;targetForm?:string;hint?:string;example?:string}
+export interface EnglishChoice {prompt:string;options:string[];correct:number;explanation:string;id?:string;openPrompt?:string;instruction?:string;targetForm?:string;hint?:string;example?:string;responseKind?:'question'|'sentence'}
 export interface EnglishWord {id:string;en:string;uk:string;example:string;pos?:string;definition?:string;conceptPrompt?:string;task?:{instruction:string;prompt:string;clue:string;answer:string;example:string;hint:string}}
 export interface EnglishCatchWord {word:string;pos:string;uk:string;meaning:string;quote:string}
 export interface EnglishFrame {label:string;phrase:string;uk:string;example:string}
@@ -17,7 +17,7 @@ export interface EnglishLesson {
   vocabulary:EnglishWord[];
   reading:{title?:string;genre?:string;guide?:string;text:string;questions:EnglishChoice[];retell:string};
   listening:{context?:string;catchWords?:EnglishCatchWord[];dialogue:{speaker:string;text:string}[];questions:EnglishChoice[]};
-  grammar:{title:string;explanation:string;nativePatterns?:EnglishFrame[];exercises:EnglishChoice[]};
+  grammar:{title:string;explanation:string;context?:string;nativePatterns?:EnglishFrame[];exercises:EnglishChoice[]};
   speaking:{role:string;prompt:string;outline:string[];phrases:string[];questions:string[];optionalQuestion:string;model:string;retry:string;code:string|null;scenario?:{layerTitle:string;context:string;task:string;pointsToCover:string[]};frames?:EnglishFrame[]};
   writing:{prompt:string;minWords:number;targetWords:string;checklist:string[];model:string;brief?:{layerTitle?:string;format:string;recipient:string;purpose:string;situation:string;requirements:string[]};frames?:EnglishFrame[]};
 }

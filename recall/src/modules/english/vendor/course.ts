@@ -922,23 +922,11 @@ Circuit breakers|A circuit breaker temporarily stops calls to a failing dependen
       grammar:{
         title:grammar[0],
         explanation:grammar[1],
+        context:card.scene+' '+card.problem,
         nativePatterns:grammarPatterns,
-        exercises:grammar[2].map(([prompt,options,correct,explanation],i)=>{
-          const pat = grammarPatterns[i] || grammarPatterns[0];
-          const targetWord = card.vocabulary[i]?.en || card.vocabulary[0]?.en;
-          return {
-            id:`${id}-g${i}`,
-            prompt:`${card.title} · ${prompt}`,
-            options:[...options],
-            correct,
-            explanation,
-            openPrompt:`Task ${i+1} (${pat.label}): Write a complete English sentence about ${card.title.toLowerCase()} using the grammar pattern “${pat.phrase}” and the term “${targetWord}”. Reference pattern: "${prompt.replace('___', options[correct])}"`,
-            instruction:`Write 1 full English sentence using the grammar pattern above. Connect the sentence to ${card.title.toLowerCase()}.`,
-            targetForm:`${pat.phrase} (e.g., use "${options[correct]}" + "${targetWord}")`,
-            hint:`${explanation} Model form: "${prompt.replace('___', options[correct])}".`,
-            example:pat.example
-          };
-        })
+        exercises:grammar[2].map(([prompt,options,correct,explanation],i)=>({
+          id:`${id}-g${i}`,prompt:`${card.title} · ${prompt}`,options:[...options],correct,explanation
+        }))
       },
       speaking:{
         role,

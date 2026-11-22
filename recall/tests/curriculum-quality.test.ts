@@ -41,7 +41,7 @@ test('All 84 lessons follow v2 5-layer progressive structure with enriched conce
     }
     assert.ok(Array.isArray(lesson.grammar.nativePatterns) && lesson.grammar.nativePatterns.length >= 3, `${lesson.id} missing grammar.nativePatterns`);
     for (const q of lesson.grammar.exercises) {
-      assert.ok(q.openPrompt && q.instruction && q.targetForm && q.hint && q.example, `${lesson.id} grammar exercise missing open task fields`);
+      assert.ok(q.openPrompt && q.instruction && q.targetForm && q.responseKind && q.example, `${lesson.id} grammar exercise missing open task fields`);
     }
     assert.ok(lesson.speaking.scenario?.context && Array.isArray(lesson.speaking.frames) && lesson.speaking.frames.length >= 3, `${lesson.id} missing speaking scenario/frames`);
     assert.ok(lesson.writing.brief?.situation && Array.isArray(lesson.writing.frames) && lesson.writing.frames.length >= 3, `${lesson.id} missing writing brief/frames`);
