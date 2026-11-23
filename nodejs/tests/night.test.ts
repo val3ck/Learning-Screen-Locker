@@ -9,6 +9,59 @@ import { freshProgress, updateLesson, completeLesson } from '../src/lib/progress
 import { mergeProgress, ProgressConflict } from '../src/lib/progress-merge';
 import { nightPlan } from '../src/lib/night-plan';
 import { createCourseBridge } from '../scripts/course-bridge';
+import { readCodeAssessment } from '../../shared/node-code-review';
+
+test('review underlines only exact, unambiguous source fragments', () => {
+  const code = 'const x = 1;\r\nreturn x + x;';
+  const findings = [
+    { severity: 'suggestion', line: 1, fragment: 'const x', explanation: 'Уточни назву.' },
+    { severity: 'error', line: 2, fragment: 'x', explanation: 'Два збіги.' },
+    { severity: 'error', line: 2, fragment: 'return y', explanation: 'Відсутній фрагмент.' },
+  ];
+  const assessment = readCodeAssessment({ score: 71, summary: 'Є коментарі.', findings }, code, []);
+  assert.deepEqual(assessment.findings.map(item => item.location), [{ line: 1, start: 0, end: 7 }, undefined, undefined]);
+  assert.throws(() => readCodeAssessment({ score: 101, summary: 'Некоректно.', findings }, code, []));
+});
+
+test('code review uses the lesson criteria, leaves progress alone, and rejects credentials', async t => {
+  const lesson = lessons[0];
+  const code = '  const amount = 1;';
+  let calls = 0;
+  const dir = await mkdtemp(join(tmpdir(), 'backend-path-assessment-'));
+  const bridge = createCourseBridge(process.cwd(), dir, async prompt => {
+    calls++;
+    const input = JSON.parse(prompt.user);
+    const context = JSON.parse(input.lesson);
+    assert.deepEqual(context.criteria, lesson.criteria);
+    assert.equal(context.task, lesson.task);
+    assert.equal(input.source, '1 | ' + code);
+    assert.match(prompt.system, /Do not run code/);
+    return { assessment: { score: 68, summary: 'Потрібне уточнення.', findings: [
+      { severity: 'error', line: 1, fragment: 'amount = 1', explanation: 'Значення має приходити з аргументу.', replacement: 'amount = input' },
+    ] } };
+  });
+  const server = createServer((req, res) => bridge(req, res, () => res.writeHead(404).end()));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const origin = 'http://127.0.0.1:' + address.port;
+  const route = origin + '/api/backend-path/';
+  const submit = (code: string, id = lesson.id, source = origin) => fetch(route + 'code-review', {
+    method: 'POST', headers: { origin: source, 'Content-Type': 'application/json', 'X-Backend-Path': '1' },
+    body: JSON.stringify({ lesson: id, code }),
+  });
+  const response = await submit(code);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.score, 68);
+  assert.deepEqual(result.findings[0].location, { line: 1, start: 8, end: 18 });
+  assert.equal((await submit('const token = "sk-example_only_for_tests";')).status, 400);
+  assert.equal((await submit(code, 'no-lesson')).status, 400);
+  assert.equal((await submit(code, lesson.id, 'https://elsewhere.example')).status, 403);
+  assert.equal((await fetch(route + 'progress').then(response => response.json())).revision, 0);
+  assert.equal(calls, 1);
+});
 
 test('night stages use read, actual practice criteria, and the regular lesson completion', () => {
   const first = lessons[0];

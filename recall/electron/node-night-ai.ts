@@ -1,4 +1,5 @@
 import {cleanLunaText,forLunaModel,lunaOptions,lunaQuestion,type LunaModel} from '../../shared/luna-chat';
+import { makeCodeReviewPrompt, readCodeAssessment } from '../../shared/node-code-review';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { safeStorage } from 'electron';
@@ -137,10 +138,24 @@ export class NodeNightAI {
 
   newSession() { this.recent = []; this.messages = []; this.scope = ''; this.cache.clear(); }
 
-  async ask(rawQuestion: string, code: string, context: unknown, plan: string, lessonScope = '', explicitBtw = false, options?:unknown) {
+  private assertAvailable() {
     if (this.running) throw Error('Дочекайся відповіді на попереднє запитання.');
     if (Date.now() < this.retryAt) throw Error('Luna тимчасово недоступна. Спробуй через хвилину.');
+  }
 
+  async review(code: string, context: unknown) {
+    this.assertAvailable();
+    if (this.demo) throw Error('Оцінювання коду доступне у звичайній сесії Node.js.');
+    const config = this.englishAI.config();
+    const separateKey = this.envKey || this.separateKey;
+    const keys = [...Object.values(config.keys) as string[], separateKey];
+    const prompt = makeCodeReviewPrompt(code, context, keys);
+    const result = await this.generate(prompt, config, this.modelChoice(), separateKey);
+    return readCodeAssessment(result, code, keys);
+  }
+
+  async ask(rawQuestion: string, code: string, context: unknown, plan: string, lessonScope = '', explicitBtw = false, options?:unknown) {
+    this.assertAvailable();
     const behavior=lunaOptions(options);
     const command=lunaQuestion(rawQuestion,'Розкажи один практичний інсайт про цю тему Node.js.');
     const parsed=command.btw?command:parseNodeBtw(rawQuestion,explicitBtw);
@@ -170,6 +185,25 @@ export class NodeNightAI {
       return cached;
     }
     if (this.demo) return 'Демо Luna. Сформулюй, що має робити твоя функція, і перевір один приклад.';
+    const result = await this.generate(prompt, config, choice, separateKey);
+    const answer = cleanLunaText(trim(result?.answer,3500),3500,[...Object.values(config.keys) as string[],separateKey]);
+    if (!answer) throw Error('Luna повернула порожню відповідь.');
+    if (!parsed.btw&&!options) {
+      this.recent = [...this.recent.slice(-1), { question: parsed.question, answer }];
+      history.push({ role: 'assistant', text: answer });
+      this.messages = history.slice(-NODE_CHAT_LIMIT);
+    }
+    this.cache.set(cacheKey, answer);
+    if (this.cache.size > 40) this.cache.delete(this.cache.keys().next().value!);
+    return answer;
+  }
+
+  private async generate(
+    prompt: { system: string; user: string; maxOutputTokens: number },
+    config: ReturnType<NodeNightAI['englishAI']['config']>,
+    choice: LunaModel | undefined,
+    separateKey: string,
+  ) {
     const provider=choice?.provider||'openai';
     if (provider==='openai'&&this.keyUnreadable && !this.envKey) throw Error('Окремий ключ не вдалося прочитати. Онови його в налаштуваннях Node.js.');
     const key=provider==='openai'?separateKey||config.keys.openai:config.keys[provider];
@@ -179,21 +213,11 @@ export class NodeNightAI {
     const client = provider==='openai'&&separateKey ? this.ownClient : this.sharedClient;
     this.running = true;
     try {
-      const result = await client.generate(provider, prompt, forLunaModel({
+      return await client.generate(provider, prompt, forLunaModel({
         ...config, keys: { [provider]: key }, models: {...config.models,openai:model},
         hybridRouting: true, complimentaryEnrolled: true,
         openaiStandardBudget: separateKey ? 25_000 : config.openaiStandardBudget,
       },choice));
-      const answer = cleanLunaText(trim(result?.answer,3500),3500,[key]);
-      if (!answer) throw Error('Luna повернула порожню відповідь.');
-      if (!parsed.btw&&!options) {
-        this.recent = [...this.recent.slice(-1), { question: parsed.question, answer }];
-        history.push({ role: 'assistant', text: answer });
-        this.messages = history.slice(-NODE_CHAT_LIMIT);
-      }
-      this.cache.set(cacheKey, answer);
-      if (this.cache.size > 40) this.cache.delete(this.cache.keys().next().value!);
-      return answer;
     } catch (error) {
       const code = (error as { code?: string }).code;
       if (code === '429' || code === '402') {

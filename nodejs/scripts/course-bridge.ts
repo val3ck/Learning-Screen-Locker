@@ -1,4 +1,5 @@
 import {forLunaModel,lunaModel,lunaOptions,lunaQuestion} from '../../shared/luna-chat';
+import {isReviewCode, makeCodeReviewPrompt, readCodeAssessment} from '../../shared/node-code-review';
 import { constants, mkdirSync, readFileSync, writeFileSync, renameSync, copyFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -35,10 +36,9 @@ function safeText(value: string, limit: number, keys: string[] = []) {
     .slice(0, limit);
 }
 
-function parseJsonAnswer(raw: unknown): string {
+function parseJsonAnswer(raw: unknown): unknown {
   const cleaned = String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  const parsed = JSON.parse(cleaned);
-  return typeof parsed?.answer === 'string' ? parsed.answer.trim() : '';
+  return JSON.parse(cleaned);
 }
 
 function loadSharedAIConfig(root: string) {
@@ -72,13 +72,13 @@ function loadSharedAIConfig(root: string) {
   return {...config,choice};
 }
 
-async function callProvider(provider: string, system: string, user: string, key: string, model: string): Promise<string> {
+async function callProvider(provider: string, system: string, user: string, key: string, model: string, outputTokens = 550): Promise<unknown> {
   if (provider === 'openai') {
     const payload: Record<string, unknown> = {
       model,
       instructions: system,
       input: user,
-      max_output_tokens: 550,
+      max_output_tokens: outputTokens,
       store: false,
       text: { format: { type: 'json_object' } },
       ...(/^(gpt-[56](?:[.-]|$)|o[134](?:-|$))/.test(model)
@@ -110,7 +110,7 @@ async function callProvider(provider: string, system: string, user: string, key:
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: 'user', parts: [{ text: user }] }],
-          generationConfig: { temperature: 0.15, maxOutputTokens: 550, responseMimeType: 'application/json' },
+          generationConfig: { temperature: 0.15, maxOutputTokens: outputTokens, responseMimeType: 'application/json' },
         }),
         signal: AbortSignal.timeout(15_000),
       },
@@ -129,7 +129,7 @@ async function callProvider(provider: string, system: string, user: string, key:
       model,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
       temperature: 0.15,
-      ...(provider === 'groq' ? { max_completion_tokens: 550 } : { max_tokens: 550 }),
+      ...(provider === 'groq' ? { max_completion_tokens: outputTokens } : { max_tokens: outputTokens }),
       response_format: { type: 'json_object' },
     }),
     signal: AbortSignal.timeout(15_000),
@@ -137,6 +137,31 @@ async function callProvider(provider: string, system: string, user: string, key:
   if (!res.ok) throw Error(`${provider} HTTP ${res.status}`);
   const data = (await res.json()) as any;
   return parseJsonAnswer(data.choices?.[0]?.message?.content);
+}
+
+type AIConfig = ReturnType<typeof loadSharedAIConfig>;
+
+function providerRoutes(config: AIConfig) {
+  const routes = config.choice ? [config.choice.provider] : config.automaticFallback ? PROVIDERS : PROVIDERS.slice(0, 1);
+  return routes.filter(id => !!config.keys[id]);
+}
+
+async function generate<T>(
+  config: AIConfig,
+  prompt: { system: string; user: string; maxOutputTokens?: number },
+  read: (value: unknown) => T,
+) {
+  let lastError: unknown;
+  for (const provider of providerRoutes(config)) {
+    const model = config.models[provider] || DEFAULT_MODELS[provider];
+    try {
+      const output = await callProvider(provider, prompt.system, prompt.user, config.keys[provider], model, prompt.maxOutputTokens);
+      return { result: read(output), provider, model };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || Error('Luna недоступна.');
 }
 
 export function parseBtwQuestion(rawQuestion: string, explicitBtw?: boolean): { btw: boolean; question: string } {
@@ -162,7 +187,7 @@ export function createCourseBridge(
   root: string,
   dataDir = process.env.BACKEND_PATH_DATA_DIR ||
     join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Backend Path'),
-  customGenerator?: (prompt: { system: string; user: string; btw: boolean }) => Promise<{ answer: string; provider?: string; model?: string }>,
+  customGenerator?: (prompt: { system: string; user: string; btw: boolean }) => Promise<{ answer?: string; assessment?: unknown; provider?: string; model?: string }>,
 ) {
   const file = join(dataDir, 'progress-v1.json');
   let recovered = false;
@@ -272,7 +297,7 @@ export function createCourseBridge(
         const saved: Saved = { version: 1, revision: current.revision + 1, progress };
         write(saved); send(200, saved); return;
       }
-      if (req.method === 'POST' && action === 'chat') {
+      if (req.method === 'POST' && (action === 'chat' || action === 'code-review')) {
         if (req.headers.origin !== 'http://' + acceptedHost || req.headers['x-backend-path'] !== '1' ||
             !req.headers['content-type']?.startsWith('application/json')) {
           send(403, { message: 'Чат Luna доступний лише зі сторінки Backend Path.' }); return;
@@ -288,8 +313,45 @@ export function createCourseBridge(
           chunks.push(chunk);
         }
         let body: { lesson?: unknown; section?: unknown; question?: unknown; code?: unknown; btw?: unknown; luna?:unknown };
-        try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          if (!body || typeof body !== 'object' || Array.isArray(body)) throw Error();
+        }
         catch { send(400, { message: 'Некоректний формат запиту до Luna.' }); return; }
+
+        if (action === 'code-review') {
+          const lesson = typeof body.lesson === 'string' ? lessonById.get(body.lesson) : undefined;
+          const code = body.code;
+          if (!lesson || !isReviewCode(code)) {
+            send(400, { message: 'Обери урок і встав код для оцінювання в межах ліміту.' });
+            return;
+          }
+          const config = loadSharedAIConfig(root);
+          const keys = Object.values(config.keys);
+          let prompt;
+          try {
+            const {title, summary, task, criteria} = lesson;
+            prompt = makeCodeReviewPrompt(code, {title, summary, task, criteria}, keys);
+          } catch (error) {
+            send(400, { message: (error as Error).message });
+            return;
+          }
+          chatPending = true;
+          try {
+            if (customGenerator) {
+              const out = await customGenerator({ ...prompt, btw: false });
+              send(200, readCodeAssessment(out.assessment, code, keys));
+              return;
+            }
+            const review = await generate(config, prompt, raw => readCodeAssessment(raw, code, keys));
+            send(200, review.result);
+          } catch {
+            send(503, { message: 'Luna не змогла оцінити код. Перевір активну модель і ключ або повтори запит пізніше.' });
+          } finally {
+            chatPending = false;
+          }
+          return;
+        }
 
         const rawQuestion = typeof body.question === 'string' ? body.question : '';
         const options=lunaOptions(body.luna);
@@ -356,31 +418,21 @@ export function createCourseBridge(
           let reply: NodeChatReply;
           if (customGenerator) {
             const out = await customGenerator({ system, user, btw: parsedBtw.btw });
-            const answer = clean(out.answer, 3500);
+            const answer = clean(out.answer ?? '', 3500);
             if (!answer) throw Error('Порожня відповідь.');
             reply = { answer, provider: out.provider || 'custom', model: out.model || 'Luna', btw: parsedBtw.btw };
           } else {
-            const routes = (config.choice?[config.choice.provider]:config.automaticFallback?PROVIDERS:PROVIDERS.slice(0,1)).filter(id => !!config.keys[id]);
-            if (!routes.length) {
+            if (!providerRoutes(config).length) {
               send(503, { message: 'Підключи AI-ключ у SQL Recall → Налаштування, щоб запитувати Luna.' });
               return;
             }
-            let lastError: unknown;
-            let resolved: NodeChatReply | null = null;
-            for (const provider of routes) {
-              try {
-                const model = config.models[provider] || DEFAULT_MODELS[provider];
-                const rawAnswer = await callProvider(provider, system, user, config.keys[provider], model);
-                const answer = clean(rawAnswer, 3500);
-                if (!answer) throw Error('Порожня відповідь.');
-                resolved = { answer, provider, model, btw: parsedBtw.btw };
-                break;
-              } catch (err) {
-                lastError = err;
-              }
-            }
-            if (!resolved) throw lastError || Error('Luna недоступна.');
-            reply = resolved;
+            const {result: answer, provider, model} = await generate(config, {system, user}, raw => {
+              const text = (raw as { answer?: unknown } | null)?.answer;
+              const answer = typeof text === 'string' ? clean(text, 3500) : '';
+              if (!answer) throw Error('Порожня відповідь.');
+              return answer;
+            });
+            reply = { answer, provider, model, btw: parsedBtw.btw };
           }
           if (!parsedBtw.btw&&!body.luna) {
             history.push({ role: 'assistant', text: reply.answer });

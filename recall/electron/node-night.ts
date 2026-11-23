@@ -1,4 +1,5 @@
 import type {LunaModel} from '../../shared/luna-chat';
+import {isReviewCode} from '../../shared/node-code-review';
 import { app, BrowserWindow, ipcMain, screen, shell, type IpcMainInvokeEvent } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -558,6 +559,17 @@ export class NodeNight {
     });
     ipcMain.handle('recall:node-ready', event => { this.site(event); return this.ready(); });
     ipcMain.handle('recall:node-act', (event, action) => { this.site(event); return this.act(action); });
+    ipcMain.handle('recall:node-review', async (event, input) => {
+      this.site(event);
+      const visibleLesson = new URL(event.senderFrame!.url).hash.split('/')[2];
+      if (!this.running || !input || !/^[a-z0-9-]{1,100}$/.test(visibleLesson ?? '') ||
+          input.lesson !== visibleLesson || !isReviewCode(input.code)) {
+        throw Error('Відкрий потрібний урок і встав код для оцінювання в межах ліміту.');
+      }
+      if (this.preview || this.options.isolated) throw Error('Оцінювання коду доступне у звичайній сесії Node.js.');
+      const context = await this.request('context?lesson=' + encodeURIComponent(visibleLesson) + '&section=check');
+      return this.ai.review(input.code, context);
+    });
     ipcMain.handle('recall:node-ask', async (event, input) => {
       this.site(event);
       if (!this.running || !input || typeof input.lesson !== 'string' || !/^[a-z0-9-]{1,100}$/.test(input.lesson) ||

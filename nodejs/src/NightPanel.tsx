@@ -1,4 +1,5 @@
 import type {LunaOptions} from '../../shared/luna-chat';
+import type {CodeAssessment} from '../../shared/node-code-review';
 import { useEffect, useState } from 'react';
 import type { Step } from './lib/progress';
 
@@ -32,6 +33,7 @@ declare global {
       subscribe(render: (state: NightView) => void): () => void;
       act(action: 'editor' | 'exit'): Promise<void>;
       ask(request: Ask): Promise<string | { answer: string; provider?: string; model?: string }>;
+      review(request: { lesson: string; code: string }): Promise<CodeAssessment>;
     };
   }
 }

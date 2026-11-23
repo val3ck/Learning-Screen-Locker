@@ -9,4 +9,5 @@ contextBridge.exposeInMainWorld('recallNode', {
   },
   act: (action: string) => ipcRenderer.invoke('recall:node-act', action),
   ask: (request: unknown) => ipcRenderer.invoke('recall:node-ask', request),
+  review: (request: unknown) => ipcRenderer.invoke('recall:node-review', request),
 });
