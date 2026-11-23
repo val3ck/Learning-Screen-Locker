@@ -54,6 +54,104 @@
 .en-inline-feedback.en-score-high{--score-ink:#256447;--score-line:#adcdb7;--score-bg:#f0f8ef}
 .en-inline-feedback.en-score-perfect{--score-ink:#6740a3;--score-line:#c9c1df;--score-bg:#faf7ff;background:linear-gradient(145deg,#fff7fc,#faf7ff 45%,#f1f8ff)}
 .en-inline-feedback.en-feedback-pending{--score-ink:#8b9b7d;--score-line:#ccd8c0;--score-bg:#f7f8f2;border-top-width:1px}
+.en-inline-feedback[data-score-pattern] {
+  position:relative;
+  isolation:isolate;
+  --motif-soft:color-mix(in srgb,var(--score-ink) 10%,transparent);
+  --motif-line:color-mix(in srgb,var(--score-ink) 19%,transparent);
+}
+.en-inline-feedback[data-score-pattern]::before {
+  content:"";
+  position:absolute;
+  inset-block-start:0;
+  inset-inline-end:0;
+  width:min(44%,185px);
+  height:128px;
+  border-start-end-radius:inherit;
+  background:var(--motif-background);
+  mask-image:linear-gradient(to bottom,#000 66%,transparent);
+  pointer-events:none;
+  z-index:-1;
+}
+.en-inline-feedback.is-stale[data-score-pattern]::before { opacity:.72; }
+
+/* Red · arcs, stairs, angled strokes */
+[data-score-pattern="red-orbit"] {
+  --motif-background:radial-gradient(circle at 89% 19%,transparent 0 28px,var(--motif-line) 29px 30px,transparent 31px 50px,var(--motif-soft) 51px 67px,transparent 68px);
+}
+[data-score-pattern="red-steps"] {
+  --motif-background:linear-gradient(135deg,var(--motif-soft) 75%,transparent 75%) right top / 58% 37% no-repeat,
+    linear-gradient(135deg,var(--motif-line) 72%,transparent 72%) right 15px top 47px / 37% 18% no-repeat,
+    linear-gradient(135deg,var(--motif-soft) 72%,transparent 72%) right 31px top 70px / 24% 17% no-repeat;
+}
+[data-score-pattern="red-slants"] {
+  --motif-background:linear-gradient(130deg,transparent 23%,var(--motif-soft) 23% 40%,transparent 40% 47%,var(--motif-line) 47% 49%,transparent 49% 57%,var(--motif-soft) 57% 65%,transparent 65%);
+}
+
+/* Amber · sun, dunes, grids, and reflections */
+[data-score-pattern="amber-dunes"] {
+  --motif-background:radial-gradient(ellipse 125px 83px at 91% -9%,var(--motif-soft) 98%,transparent),
+    radial-gradient(ellipse 130px 91px at 110% 4%,transparent 97%,var(--motif-line) 98% 99%,transparent);
+}
+[data-score-pattern="amber-sun"] {
+  --motif-background:radial-gradient(circle at 83% 24%,var(--motif-line) 0 19px,transparent 20px 32px,var(--motif-soft) 33px 45px,transparent 46px 52px,var(--motif-soft) 53px 54px,transparent 55px);
+}
+[data-score-pattern="amber-quarter"] {
+  --motif-background:radial-gradient(circle at 100% 0,var(--motif-soft) 0 49px,transparent 50px 63px,var(--motif-line) 64px 65px,transparent 66px),
+    radial-gradient(circle at 42% 33%,var(--motif-line) 0 5px,transparent 6px);
+}
+[data-score-pattern="amber-tiles"] {
+  --motif-background:conic-gradient(from 90deg at 35% 35%,var(--motif-soft) 25%,transparent 0) right 11px top 12px / 56px 56px no-repeat,
+    conic-gradient(from 90deg at 40% 40%,var(--motif-line) 25%,transparent 0) right 42px top 42px / 39px 39px no-repeat,
+    conic-gradient(from 90deg at 40% 40%,var(--motif-soft) 25%,transparent 0) right 69px top 8px / 35px 35px no-repeat;
+}
+[data-score-pattern="amber-beam"] {
+  --motif-background:linear-gradient(151deg,transparent 22%,var(--motif-soft) 22% 43%,transparent 43% 51%,var(--motif-line) 51% 53%,transparent 53%),
+    radial-gradient(circle at 85% 68%,var(--motif-soft) 0 8px,transparent 9px);
+}
+[data-score-pattern="amber-ripples"] {
+  --motif-background:repeating-radial-gradient(ellipse 100px 70px at 100% -2%,transparent 0 12px,var(--motif-line) 13px 14px,transparent 15px 20px) right top / 77% 79% no-repeat;
+}
+[data-score-pattern="amber-dots"] {
+  --motif-background:radial-gradient(circle,var(--motif-line) 1.4px,transparent 2.4px) right 6px top 6px / 17px 17px repeat,
+    radial-gradient(circle at 100% 0,var(--motif-soft) 0 57px,transparent 58px);
+}
+.en-inline-feedback[data-score-pattern="amber-dots"]::before {
+  mask-image:radial-gradient(ellipse at top right,#000 16%,transparent 73%);
+}
+
+/* Green · organic outlines and layered forms */
+[data-score-pattern="green-pebbles"] {
+  --motif-background:radial-gradient(ellipse 39px 26px at 83% 27%,var(--motif-soft) 96%,transparent),
+    radial-gradient(ellipse 28px 19px at 55% 41%,var(--motif-line) 96%,transparent),
+    radial-gradient(ellipse 20px 14px at 88% 65%,var(--motif-soft) 96%,transparent);
+}
+[data-score-pattern="green-canopy"] {
+  --motif-background:radial-gradient(ellipse 83px 73px at 91% 0%,var(--motif-soft) 98%,transparent),
+    radial-gradient(ellipse 71px 72px at 61% -14%,transparent 97%,var(--motif-line) 98% 99%,transparent);
+}
+[data-score-pattern="green-terraces"] {
+  --motif-background:linear-gradient(153deg,transparent 54%,var(--motif-line) 55% 57%,transparent 58%) right top / 150px 63px no-repeat,
+    linear-gradient(153deg,transparent 54%,var(--motif-soft) 55% 67%,transparent 68%) right top 24px / 134px 66px no-repeat,
+    linear-gradient(153deg,transparent 54%,var(--motif-line) 55% 57%,transparent 58%) right top 58px / 108px 50px no-repeat;
+}
+[data-score-pattern="green-rings"] {
+  --motif-background:radial-gradient(circle at 88% 26%,transparent 0 27px,var(--motif-line) 28px 29px,transparent 30px),
+    radial-gradient(circle at 68% 46%,transparent 0 24px,var(--motif-soft) 25px 31px,transparent 32px);
+}
+[data-score-pattern="green-grove"] {
+  --motif-background:radial-gradient(ellipse 12px 40px at 92% 31%,var(--motif-soft) 95%,transparent),
+    radial-gradient(ellipse 9px 33px at 78% 32%,var(--motif-line) 95%,transparent),
+    radial-gradient(ellipse 10px 25px at 63% 33%,var(--motif-soft) 95%,transparent);
+}
+[data-score-pattern="green-horizon"] {
+  --motif-background:radial-gradient(ellipse 105px 72px at 112% 0%,transparent 63%,var(--motif-line) 65% 66%,transparent 67%),
+    radial-gradient(ellipse 105px 72px at 109% 24%,transparent 65%,var(--motif-soft) 67% 88%,transparent 90%);
+}
+
+@media (prefers-contrast:more),(forced-colors:active) {
+  .en-inline-feedback[data-score-pattern]::before { display:none; }
+}
 .en-feedback-heading{flex-wrap:wrap}
 .en-score-display{position:relative;isolation:isolate;min-width:0;max-width:100%;flex:1}
 .en-score-eyebrow{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#687663}

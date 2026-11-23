@@ -28,6 +28,32 @@ test('Speech IPC selects only known content from all 84 lessons',()=>{
   for(const lesson of lessons){assert.equal(englishSpeechText(lesson,{kind:'word',index:0}),lesson.vocabulary[0].en);assert.equal(englishSpeechText(lesson,{kind:'model'}),lesson.speaking.model);assert.ok(englishSpeechText(lesson,{kind:'dialogue'}).includes(lesson.listening.dialogue[0].text));}
   assert.throws(()=>englishSpeechText(lessons[0],{kind:'word',index:-1}));assert.throws(()=>englishSpeechText(lessons[0],{kind:'word',index:99}));assert.throws(()=>englishSpeechText(lessons[0],{kind:'text',text:'arbitrary'} as any));
 });
+test('Word batches share pending work, cache each clip together, and reuse offline fallback',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'recall-speech-words-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const words=['enormous','track down','bottleneck'];
+  const clips=words.map(word=>({...audio(),voice:`Clip for ${word}`}));
+  let cloudCalls=0,localCalls=0;
+  const cloud={profile:'gemini-test',render:async()=>{cloudCalls++;return clips.map(clip=>({...clip,provider:'gemini'}));}};
+  const local=async(input:string[])=>{localCalls++;assert.deepEqual(input,words);return clips;};
+  const service=new EnglishSpeech(root,undefined,local);
+  const [first,last]=await Promise.all([service.synthesizeWords(words,cloud),service.synthesizeWords(words,cloud)]);
+  assert.equal(first[0].voice,'Clip for enormous');
+  assert.equal(last[2].voice,'Clip for bottleneck');
+  assert.equal(cloudCalls,1);
+  assert.equal(localCalls,0);
+  const reopened=new EnglishSpeech(root,undefined,local);
+  assert.deepEqual(await reopened.synthesizeWords(words,cloud),first);
+  assert.equal(cloudCalls,1);
+
+  const incomplete={profile:'other-test',render:async()=>{cloudCalls++;return clips.slice(0,1);}};
+  const fallback=await service.synthesizeWords(words,incomplete);
+  assert.equal(fallback[1].provider,'local');
+  assert.equal(fallback[1].voice,'Clip for track down');
+  assert.deepEqual(await reopened.synthesizeWords(words,incomplete),fallback);
+  assert.equal(cloudCalls,2);
+  assert.equal(localCalls,1);
+});
 test('Browser speech waits for voiceschanged and never substitutes a remote or Russian voice',async()=>{
   let voices:SpeechSynthesisVoice[]=[];const synth=Object.assign(new EventTarget(),{getVoices:()=>voices}) as unknown as SpeechSynthesis;
   const english={lang:'en-US',localService:true} as SpeechSynthesisVoice;

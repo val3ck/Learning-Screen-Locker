@@ -16,6 +16,44 @@ function gradeInput(answer){
 }
 function wav(pcm,rate=24000){const h=Buffer.alloc(44);h.write('RIFF');h.writeUInt32LE(pcm.length+36,4);h.write('WAVEfmt ',8);h.writeUInt32LE(16,16);h.writeUInt16LE(1,20);h.writeUInt16LE(1,22);h.writeUInt32LE(rate,24);h.writeUInt32LE(rate*2,28);h.writeUInt16LE(2,32);h.writeUInt16LE(16,34);h.write('data',36);h.writeUInt32LE(pcm.length,40);return Buffer.concat([h,pcm]);}
 function joinWav(buffers){let fmt;const data=[];for(const b of buffers){if(b.toString('ascii',0,4)!=='RIFF'||b.toString('ascii',8,12)!=='WAVE')throw Error('Invalid voice audio.');for(let i=12;i+8<=b.length;){const kind=b.toString('ascii',i,i+4),n=b.readUInt32LE(i+4);if(i+8+n>b.length)throw Error('Truncated audio.');if(kind==='fmt '){const f=b.subarray(i+8,i+8+n);if(fmt&&!fmt.equals(f))throw Error('Incompatible audio segments.');fmt=f;}if(kind==='data')data.push(b.subarray(i+8,i+8+n));i+=8+n+(n%2);}}if(!fmt||!data.length)throw Error('Empty audio.');const size=data.reduce((n,b)=>n+b.length,0),h=Buffer.alloc(28+fmt.length);h.write('RIFF');h.writeUInt32LE(h.length+size-8,4);h.write('WAVEfmt ',8);h.writeUInt32LE(fmt.length,16);fmt.copy(h,20);h.write('data',20+fmt.length);h.writeUInt32LE(size,24+fmt.length);return Buffer.concat([h,...data]);}
+// Keep clip boundaries local. A cloud reply with missing or ambiguous pauses
+// is unusable because each card must play only its own word.
+function splitWordAudio(audio,count){
+ let format,pcm;
+ if(audio.toString('ascii',0,4)!=='RIFF'||audio.toString('ascii',8,12)!=='WAVE')throw Error('Invalid word audio.');
+ for(let offset=12;offset+8<=audio.length;){
+  const name=audio.toString('ascii',offset,offset+4),size=audio.readUInt32LE(offset+4);
+  const start=offset+8,end=start+size;
+  if(end>audio.length)throw Error('Truncated word audio.');
+  if(name==='fmt ')format=audio.subarray(start,end);
+  if(name==='data')pcm=audio.subarray(start,end);
+  offset=end+(size%2);
+ }
+ if(!format||format.length<16||format.readUInt16LE(0)!==1||format.readUInt16LE(2)!==1||format.readUInt16LE(14)!==16||!pcm?.length||pcm.length%2)throw Error('Unsupported word audio.');
+ const rate=format.readUInt32LE(4),samples=pcm.length/2;
+ if(rate<8000||rate>48000||samples>rate*(count*6+8))throw Error('Invalid word audio length.');
+ const frame=Math.round(rate*.01),levels=new Float32Array(Math.ceil(samples/frame));
+ let peak=0;
+ for(let start=0,index=0;start<samples;start+=frame,index++){
+  const end=Math.min(start+frame,samples);
+  let sum=0;
+  for(let sample=start;sample<end;sample++){const amplitude=pcm.readInt16LE(sample*2);sum+=amplitude*amplitude;}
+  levels[index]=Math.sqrt(sum/(end-start));
+  peak=Math.max(peak,levels[index]);
+ }
+ const ranges=[];
+ const threshold=Math.max(65,peak*.022);
+ const gap=Math.round(rate*.44);
+ for(let index=0;index<levels.length;index++){
+  if(levels[index]<threshold)continue;
+  const start=index*frame,end=Math.min(start+frame,samples),previous=ranges.at(-1);
+  if(previous&&start-previous.end<gap)previous.end=end;
+  else ranges.push({start,end});
+ }
+ if(ranges.length!==count||ranges.some(({start,end})=>end-start<rate*.07||end-start>rate*5))throw Error('The spoken words could not be separated.');
+ const padding=Math.round(rate*.12);
+ return ranges.map(({start,end})=>wav(pcm.subarray(Math.max(0,start-padding)*2,Math.min(samples,end+padding)*2),rate).toString('base64'));
+}
 class EnglishAI{
  constructor({statisticsPath,legacyConfigPath,fetchImpl=null,env=process.env}={}){this.root=statisticsPath;this.file=path.join(path.basename(statisticsPath)==='statistics'?path.dirname(statisticsPath):statisticsPath,'private','english-ai.json');this.legacy=legacyConfigPath;this.fetch=fetchImpl||((...args)=>globalThis.fetch(...args));this.env=env;this.cooldown={};this.cooldownReasons={};}
  config(includeEnv=true){let c={keys:{},models:{...DEFAULTS},order:[...IDS],ttsModel:'gemini-3.8-flash-lite-tts',cloudVoice:true};try{const old=JSON.parse(fs.readFileSync(this.legacy,'utf8'));c.keys={...old.keys};c.models={...c.models,...old.models};}catch{}try{const d=JSON.parse(fs.readFileSync(this.file,'utf8'));c={...c,...d,keys:{...c.keys,...d.keys},models:{...c.models,...d.models}};}catch{}for(const id of c.disabledKeys||[])delete c.keys[id];if(includeEnv)for(const id of IDS)if(this.env[id.toUpperCase()+'_API_KEY'])c.keys[id]=this.env[id.toUpperCase()+'_API_KEY'];c.order=normaliseOrder(c.order);return c;}
@@ -109,8 +147,72 @@ class EnglishAI{
  async conclude(bundle,rows){const c=this.requestConfig(bundle,this.config()),key=this.overviewKey(bundle,rows,c),entry=this.readCache()[key];let result;let reusable;try{if(entry?.overview)reusable=Coaching.validateOverview({summary:entry.overview.summary,strengths:entry.overview.strengthEvidence,weaknesses:entry.overview.weaknesses,nextStep:entry.overview.nextStep},bundle.answers.map(a=>a.key));}catch{}if(reusable){result={overview:reusable,provider:entry.provider,model:entry.model,cached:true};}else{result=await this.chain(async(id,c)=>({overview:Coaching.validateOverview((await this.generate(id,Coaching.overviewPrompt(bundle,rows),c)).blockOverview,bundle.answers.map(a=>a.key)),provider:id,model:c.models[id]}),undefined,'text',c);this.writeCache({[key]:{at:Date.now(),overview:result.overview,provider:result.provider,model:result.model}});}return {...result,blockSummary:{snapshot:Coaching.snapshot(bundle.answers),checkedAt:new Date().toISOString(),provider:result.provider,model:result.model,conclusion:{...P.blockConclusion(rows),...result.overview}}};}
  async hint(bundle,question,modelChoice){if(typeof question!=='string'||!question.trim()||question.length>1500)throw Error('Ask a short question about the task.');const local=!bundle.lunaBtw&&P.locationHelp(bundle,(bundle.coaching?.targetExplicit?bundle.coaching.targetKey+' ':'')+question);if(local)return {hint:{...local,userQuestion:question,provider:'local',model:'task-context'},attempts:[]};const base=this.requestConfig(bundle,this.config()),c=modelChoice?{...base,models:{...base.models,[modelChoice.provider]:modelChoice.model},order:[modelChoice.provider],automaticFallback:false}:base,prompt=P.helpPrompt(bundle,question),key=crypto.createHash('sha256').update(JSON.stringify({type:'hint-v2',prompt,...this.textCacheConfig(c)})).digest('hex'),entry=this.readCache()[key];if(entry?.hint)try{return {hint:{...P.validateHint(entry.hint,bundle),targetKey:bundle.coaching?.targetKey||undefined,userQuestion:question,...(entry.routing?{routing:{...entry.routing,cached:true}}:{}),provider:entry.provider,model:entry.model,cached:true},attempts:[]};}catch{}const result=await this.chain(async(id,c)=>({hint:{...P.validateHint(await this.generate(id,prompt,c),bundle),targetKey:bundle.coaching?.targetKey||undefined,userQuestion:question,provider:id,model:c.models[id]}}),undefined,'text',c);this.writeCache({[key]:{at:Date.now(),provider:result.hint.provider,model:result.hint.model,routing:result.routing,hint:result.hint}});return result;}
  async transcribe(clip){if(!clip||typeof clip.audio!=='string'||clip.audio.length>14000000||!/^audio\/(webm|ogg|mp4|wav|mpeg)(;.*)?$/.test(clip.mimeType)||!/^[A-Za-z0-9+/=\r\n]+$/.test(clip.audio))throw Error('Invalid recording.');const models=this.config().models,cacheKey=crypto.createHash('sha256').update(JSON.stringify(['transcription-v1',clip.audio,clip.mimeType,'whisper-large-v3-turbo',models.gemini])).digest('hex'),saved=this.readCache()[cacheKey];if(saved?.transcript&&typeof saved.transcript.text==='string'&&saved.transcript.text.trim()&&saved.transcript.text.length<=12000)return {transcript:{...saved.transcript,...(saved.transcript.routing?{routing:{...saved.transcript.routing,cached:true}}:{}),cached:true,confirmed:false},attempts:[]};const result=await this.chain(async(id,c)=>{let text;if(id==='groq'){const mime=clip.mimeType.split(';')[0],ext={'audio/webm':'webm','audio/ogg':'ogg','audio/mp4':'m4a','audio/wav':'wav','audio/mpeg':'mp3'}[mime],form=new FormData();form.append('file',new Blob([Buffer.from(clip.audio,'base64')],{type:mime}),'answer.'+ext);form.append('model','whisper-large-v3-turbo');form.append('language','en');form.append('response_format','json');const d=await this.remote('https://api.groq.com/openai/v1/audio/transcriptions',{method:'POST',headers:{Authorization:'Bearer '+c.keys.groq},body:form});text=d.text;}else{const d=await this.remote('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(c.models.gemini)+':generateContent',{method:'POST',headers:{'x-goog-api-key':c.keys.gemini,'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:'Transcribe the English speech verbatim. Do not improve grammar, translate or complete missing words. Output only the transcript. If there is no intelligible speech, output an empty string.'},{inlineData:{mimeType:clip.mimeType.split(';')[0],data:clip.audio}}]}],generationConfig:{temperature:0,maxOutputTokens:3500}})});text=d.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('');}if(typeof text!=='string'||!text.trim()||text.length>12000)throw Error('No intelligible speech.');return {transcript:{text,provider:id,checkedAt:new Date().toISOString(),confirmed:false}};},['groq','gemini'],'transcription');this.writeCache({[cacheKey]:{at:Date.now(),transcript:result.transcript}});return result;}
- async voice(turns){const c=this.config();if(!c.cloudVoice)throw Error('Cloud voice is disabled.');if(!Array.isArray(turns)||!turns.length||turns.length>12||turns.some(t=>typeof t.text!=='string')||turns.map(t=>t.text).join(' ').length>8000)throw Error('Invalid lesson audio.');const hash=crypto.createHash('sha256').update(JSON.stringify([turns,c.ttsModel,'voice-v1'])).digest('hex'),dir=path.join(this.root,'modules/english/generated-audio'),file=path.join(dir,hash+'.json');try{const cached=JSON.parse(fs.readFileSync(file,'utf8'));return {...cached,...(cached.routing?{routing:{...cached.routing,cached:true}}:{}),cached:true};}catch{}
- const result=await this.chain(async(id,c)=>{let audio;if(id==='gemini'){const speakers=[...new Set(turns.map(t=>t.speaker||'Narrator'))].slice(0,2),content=turns.map(t=>({type:'text',text:t.text,annotations:[{type:'speech_metadata',...(speakers.length>1?{speaker:speakers.includes(t.speaker)?t.speaker:speakers[0]}:{}),style:'Natural clear British English learning dialogue. Moderate pace. Read the exact text.'}]}));const d=await this.remote('https://generativelanguage.googleapis.com/v1beta/interactions',{method:'POST',headers:{'x-goog-api-key':c.keys.gemini,'Content-Type':'application/json'},body:JSON.stringify({model:c.ttsModel,input:[{type:'user_input',content}],response_format:{type:'audio'},generation_config:{speech_config:speakers.length===1?[{voice:'Kore'}]:{speakers:speakers.map((speaker,i)=>({speaker,voice:i?'Kore':'Puck'}))}}})});const block=d.steps?.filter(s=>s.type==='model_output').flatMap(s=>s.content||[]).filter(p=>p.type==='audio').at(-1)||d.output_audio;if(!block?.data)throw Error('No generated voice.');audio=Buffer.from(block.data,'base64');if(audio.toString('ascii',0,4)!=='RIFF')audio=wav(audio);}else{const pieces=[];for(const [i,t]of turns.entries()){let text=t.text;while(text.length){let n=Math.min(190,text.length);if(n<text.length){const cut=text.lastIndexOf(' ',n);if(cut>0)n=cut;}pieces.push(await this.remote('https://api.groq.com/openai/v1/audio/speech',{method:'POST',headers:{Authorization:'Bearer '+c.keys.groq,'Content-Type':'application/json'},body:JSON.stringify({model:'canopylabs/orpheus-v1-english',voice:i%2?'diana':'troy',input:text.slice(0,n),response_format:'wav'})},true));text=text.slice(n).trim();}}audio=joinWav(pieces);}if(audio.length>20000000)throw Error('Generated audio too long.');return {base64:audio.toString('base64'),mime:'audio/wav',voice:id==='gemini'?'Gemini · Puck / Kore':'Groq · Troy / Diana',provider:id,language:'en',model:id==='gemini'?c.ttsModel:'canopylabs/orpheus-v1-english'};},['gemini','groq'],'voice');fs.mkdirSync(dir,{recursive:true});const files=fs.readdirSync(dir).filter(f=>/^[a-f0-9]{64}\.json$/.test(f)).map(f=>({f,mtime:fs.statSync(path.join(dir,f)).mtimeMs,size:fs.statSync(path.join(dir,f)).size})).sort((a,b)=>a.mtime-b.mtime);let size=files.reduce((n,f)=>n+f.size,0);for(const f of files){if(size<64000000)break;fs.unlinkSync(path.join(dir,f.f));size-=f.size;}fs.writeFileSync(file,JSON.stringify(result));return result;
+ async renderVoice(turns,c,isolatedWords=false){
+  return this.chain(async(id,config)=>{
+   let audio;
+   if(id==='gemini'){
+    const speakers=[...new Set(turns.map(t=>t.speaker||'Narrator'))].slice(0,2);
+    const lines=isolatedWords?[{speaker:'Narrator',text:turns.map(t=>t.text).join(' <long pause> ')}]:turns;
+    const style=isolatedWords
+      ?'Read each word or phrase exactly once in order, clearly, with roughly one second of silence at every pause. No introduction, numbering or other speech.'
+      :'Natural clear British English learning dialogue. Moderate pace. Read the exact text.';
+    const content=lines.map(t=>({type:'text',text:t.text,annotations:[{type:'speech_metadata',...(speakers.length>1?{speaker:speakers.includes(t.speaker)?t.speaker:speakers[0]}:{}),style}]}));
+    const result=await this.remote('https://generativelanguage.googleapis.com/v1beta/interactions',{
+     method:'POST',headers:{'x-goog-api-key':config.keys.gemini,'Content-Type':'application/json'},
+     body:JSON.stringify({model:config.ttsModel,input:[{type:'user_input',content}],
+      response_format:isolatedWords?{type:'audio',mime_type:'audio/l16',sample_rate:24000}:{type:'audio'},
+      generation_config:{speech_config:speakers.length===1?[{voice:'Kore'}]:{speakers:speakers.map((speaker,i)=>({speaker,voice:i?'Kore':'Puck'}))}}})
+    });
+    const block=result.steps?.filter(s=>s.type==='model_output').flatMap(s=>s.content||[]).filter(p=>p.type==='audio').at(-1)||result.output_audio;
+    if(!block?.data)throw Error('No generated voice.');
+    audio=Buffer.from(block.data,'base64');
+    if(audio.toString('ascii',0,4)!=='RIFF')audio=wav(audio);
+   }else{
+    const request=(input,voice)=>this.remote('https://api.groq.com/openai/v1/audio/speech',{
+     method:'POST',headers:{Authorization:'Bearer '+config.keys.groq,'Content-Type':'application/json'},
+     body:JSON.stringify({model:'canopylabs/orpheus-v1-english',voice,input,response_format:'wav'})
+    },true);
+    if(isolatedWords){
+     const text=turns.map(t=>t.text).join('...\n\n');
+     if(text.length>200)throw Error('Word batch is too long for the voice provider.');
+     audio=await request(text,'troy');
+    }else{
+     const pieces=[];
+     for(const [i,t]of turns.entries()){
+      let text=t.text;
+      while(text.length){
+       let n=Math.min(190,text.length);
+       if(n<text.length){const cut=text.lastIndexOf(' ',n);if(cut>0)n=cut;}
+       pieces.push(await request(text.slice(0,n),i%2?'diana':'troy'));
+       text=text.slice(n).trim();
+      }
+     }
+     audio=joinWav(pieces);
+    }
+   }
+   if(audio.length>20000000)throw Error('Generated audio too long.');
+   const voice=id==='gemini'?'Gemini · Puck / Kore':'Groq · Troy / Diana';
+   const format={mime:'audio/wav',voice,provider:id,language:'en',model:id==='gemini'?config.ttsModel:'canopylabs/orpheus-v1-english'};
+   if(isolatedWords)return {...format,clips:splitWordAudio(audio,turns.length)};
+   return {...format,base64:audio.toString('base64')};
+  },['gemini','groq'],'voice',c);
+ }
+ async voice(turns,isolatedWords=false){
+  const c=this.config();
+  if(!c.cloudVoice)throw Error('Cloud voice is disabled.');
+  if(!Array.isArray(turns)||!turns.length||turns.length>12||turns.some(t=>typeof t.text!=='string')||turns.map(t=>t.text).join(' ').length>8000)throw Error('Invalid lesson audio.');
+  // Isolated clips are cached together by EnglishSpeech, including local fallback.
+  if(isolatedWords)return this.renderVoice(turns,c,true);
+  const hash=crypto.createHash('sha256').update(JSON.stringify([turns,c.ttsModel,'voice-v1'])).digest('hex');
+  const dir=path.join(this.root,'modules/english/generated-audio'),file=path.join(dir,hash+'.json');
+  try{const cached=JSON.parse(fs.readFileSync(file,'utf8'));return {...cached,...(cached.routing?{routing:{...cached.routing,cached:true}}:{}),cached:true};}catch{}
+  const result=await this.renderVoice(turns,c);
+  fs.mkdirSync(dir,{recursive:true});
+  const files=fs.readdirSync(dir).filter(f=>/^[a-f0-9]{64}\.json$/.test(f)).map(f=>({f,mtime:fs.statSync(path.join(dir,f)).mtimeMs,size:fs.statSync(path.join(dir,f)).size})).sort((a,b)=>a.mtime-b.mtime);
+  let size=files.reduce((n,f)=>n+f.size,0);
+  for(const f of files){if(size<64000000)break;fs.unlinkSync(path.join(dir,f.f));size-=f.size;}
+  fs.writeFileSync(file,JSON.stringify(result));
+  return result;
  }
 }
 module.exports={EnglishAI,AIError,wav,joinWav,DEFAULTS};

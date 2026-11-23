@@ -1,5 +1,21 @@
 const escape=(v:unknown)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export function scoreTone(score:number){return score===100?'perfect':score>=80?'high':score>=50?'medium':'low';}
+const scorePatterns={
+  low:['red-orbit','red-steps','red-slants'],
+  medium:['amber-dunes','amber-sun','amber-quarter','amber-tiles','amber-beam','amber-ripples','amber-dots'],
+  high:['green-pebbles','green-canopy','green-terraces','green-rings','green-grove','green-horizon'],
+} as const;
+
+export function scorePattern(score:number,attemptId:string,answerKey:string){
+  const tone=scoreTone(score);
+  if(tone==='perfect')return undefined;
+  const numbered=/^(.*?)-(\d+)$/.exec(answerKey);
+  const seed=`${attemptId}:${numbered?.[1]??answerKey}`;
+  let hash=0;
+  for(let i=0;i<seed.length;i++)hash=(Math.imul(hash,31)+seed.charCodeAt(i))>>>0;
+  const options=scorePatterns[tone];
+  return options[(hash+Number(numbered?.[2]??0))%options.length];
+}
 export function scoreBadge(score:number,id:string,animate:boolean){const tone=scoreTone(score);return `<div class="en-score-display" ${animate&&tone==='perfect'?`data-en-celebration-id="${escape(id)}"`:''}><span class="en-score-eyebrow">AI estimate</span><div class="en-score-number"><strong class="en-score-value">${score}</strong><span>/100</span></div><span class="en-score-label">${{perfect:'Perfect for this task',high:'Strong result',medium:'Developing',low:'Needs practice'}[tone]}</span>${tone==='perfect'?`<span class="en-score-fireworks" aria-hidden="true">${[0,1,2].map(b=>`<span class="en-score-burst" style="--burst:${b}">${Array.from({length:8},(_,i)=>`<i style="--ray:${i};--spark:${['#e76886','#d39b24','#269d83','#8b6ccc'][i%4]}"></i>`).join('')}</span>`).join('')}</span>`:''}</div>`;}
 const boundRoots=new WeakSet<HTMLElement>(),celebrated=new Set<string>();let restored=false;
 const celebrationObservers=new WeakMap<HTMLElement,IntersectionObserver>();

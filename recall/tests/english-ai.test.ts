@@ -55,4 +55,45 @@ test('AI scores apply only to the current complete block; editing and hint use a
 test('All 84 topics have own-answer tasks and no compulsory chunk reconstruction; legacy drafts survive',()=>{for(const l of (C as any).lessons){assert.equal(l.productionMode,'ai-opinion-v1');assert.equal(l.guidedTasks,undefined);const s={lesson:l,reviews:[],answers:{}};for(const area of ['vocabulary','reading','speaking','writing'])assert.ok((L as any).areaItems(s,area).length>0);}const c=new EnglishController(newEnglishDocument());c.start();const doc=structuredClone(c.document);(doc.course.activeSession!.lesson as any).learningLanguageVersion=3;doc.course.activeSession!.lesson.guidedTasks=(L as any).buildGuidedTasks(doc.course.activeSession!.lesson);doc.course.activeSession!.answers['review-0']='Keep my own draft.';const next=new EnglishController(doc);assert.equal(next.view().attempt!.answers['review-0'],'Keep my own draft.');assert.equal(next.view().attempt!.reviews[0].kind,'open');});
 test('ASR falls back to Gemini; cloud TTS is cached and free-router settings cannot choose paid models',async()=>{const a=fixture();a.save({provider:'groq',key:'fake'});a.save({provider:'gemini',key:'fake'});let count=0;a.fetch=async(url:string)=>{count++;if(url.includes('groq'))return new Response('{}',{status:503});if(url.endsWith('interactions'))return Response.json({steps:[{type:'model_output',content:[{type:'audio',data:AI.wav(Buffer.alloc(48)).toString('base64')}]}]});return Response.json({candidates:[{content:{parts:[{text:'This is my uncorrected transcript.'}]}}]});};const t=await a.transcribe({audio:'AAAA',mimeType:'audio/webm'});assert.equal(t.transcript.provider,'gemini');const audio=await a.voice([{speaker:'A',text:'What do you think?'},{speaker:'B',text:'I prefer a clear explanation.'}]);assert.equal(audio.provider,'gemini');const before=count;assert.equal((await a.voice([{speaker:'A',text:'What do you think?'},{speaker:'B',text:'I prefer a clear explanation.'}])).cached,true);assert.equal(count,before);assert.throws(()=>a.save({provider:'openrouter',model:'paid/model'}));});
 
+test('Word pronunciation makes one cloud request and returns independent clips in card order',async()=>{
+  const words=['enormous','track down','bottleneck'];
+  const turns=words.map(text=>({speaker:'Narrator',text}));
+  const samples=words.map((_,index)=>{
+    const pcm=Buffer.alloc(24000/2);
+    for(let offset=0;offset<pcm.length;offset+=2)pcm.writeInt16LE((index+1)*1000,offset);
+    return pcm;
+  });
+  const silence=Buffer.alloc(48000);
+  const combined=AI.wav(Buffer.concat([samples[0],silence,samples[1],silence,samples[2]]));
+  for(const provider of ['gemini','groq']){
+    const a=fixture();a.save({provider,key:'fake'});
+    let calls=0;
+    a.remote=async(_url:string,options:any)=>{
+      calls++;
+      const body=JSON.parse(options.body);
+      if(provider==='gemini'){
+        assert.equal(body.input[0].content[0].text,words.join(' <long pause> '));
+        return {output_audio:{data:combined.toString('base64')}};
+      }
+      assert.equal(body.input,words.join('...\n\n'));
+      return combined;
+    };
+    const result=await a.voice(turns,true);
+    assert.equal(calls,1);
+    assert.equal(result.provider,provider);
+    assert.equal(result.base64,undefined);
+    assert.equal(result.clips.length,words.length);
+    for(let index=0;index<words.length;index++){
+      const clip=Buffer.from(result.clips[index],'base64');
+      assert.equal(clip.toString('ascii',0,4),'RIFF');
+      const heard=new Set();
+      for(let offset=44;offset<clip.length;offset+=2){const sample=clip.readInt16LE(offset);if(sample)heard.add(sample);}
+      assert.deepEqual([...heard],[(index+1)*1000]);
+    }
+  }
+  const ambiguous=fixture();ambiguous.save({provider:'gemini',key:'fake'});
+  ambiguous.remote=async()=>({output_audio:{data:AI.wav(Buffer.concat(samples)).toString('base64')}});
+  await assert.rejects(ambiguous.voice(turns,true),/All configured providers failed/);
+});
+
 test('Malformed provider responses fall through to OpenRouter Free; disconnect does not resurrect a legacy key',async()=>{const a=fixture();for(const id of ['groq','gemini','openrouter'])a.save({provider:id,key:'fake-'+id});a.fetch=async(url:string)=>url.includes('openrouter')?Response.json({choices:[{message:{content:JSON.stringify(reply(bundle()))}}]}):Response.json({choices:[{message:{content:'not-json'}}],candidates:[]});const r=await a.grade(bundle());assert.equal(r.assessment.provider,'openrouter');assert.equal(r.assessment.model,'openrouter/free');assert.equal(r.attempts.length,2);const old=path.join(path.dirname(a.file),'legacy.json');fs.writeFileSync(old,JSON.stringify({keys:{gemini:'old-key'},models:{}}));a.legacy=old;a.save({provider:'gemini',remove:true});assert.equal(a.settings().providers.find((p:any)=>p.id==='gemini').configured,false);assert.equal(JSON.parse(fs.readFileSync(old,'utf8')).keys.gemini,undefined);});

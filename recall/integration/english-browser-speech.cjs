@@ -45,7 +45,6 @@ $ErrorActionPreference='Stop'
 [Console]::InputEncoding=New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false)
 $synth=$null
-$stream=$null
 try {
   $request=[Console]::In.ReadToEnd() | ConvertFrom-Json
   Add-Type -AssemblyName System.Speech
@@ -54,17 +53,21 @@ try {
   if(-not $voice){throw 'NO_LOCAL_ENGLISH_VOICE'}
   $synth.SelectVoice($voice.VoiceInfo.Name)
   $synth.Rate=-1
-  $stream=New-Object System.IO.MemoryStream
-  $synth.SetOutputToWaveStream($stream)
-  $synth.Speak([string]$request.text)
-  $synth.SetOutputToNull()
-  [Console]::Out.Write((@{mime='audio/wav';voice=$voice.VoiceInfo.Name;language=$voice.VoiceInfo.Culture.Name;base64=[Convert]::ToBase64String($stream.ToArray())} | ConvertTo-Json -Compress))
+  $clips=@(foreach($text in $request.texts){
+    $stream=New-Object System.IO.MemoryStream
+    try {
+      $synth.SetOutputToWaveStream($stream)
+      $synth.Speak([string]$text)
+      $synth.SetOutputToNull()
+      @{mime='audio/wav';voice=$voice.VoiceInfo.Name;language=$voice.VoiceInfo.Culture.Name;base64=[Convert]::ToBase64String($stream.ToArray())}
+    } finally { $stream.Dispose() }
+  })
+  [Console]::Out.Write((ConvertTo-Json -InputObject $clips -Compress))
 } catch {
   [Console]::Error.Write($_.Exception.Message)
   exit 1
 } finally {
   if($synth){$synth.Dispose()}
-  if($stream){$stream.Dispose()}
 }
 `;
 var MAX_AUDIO_BYTES = 8 * 1024 * 1024;
@@ -75,7 +78,15 @@ function validateSpeechAudio(value) {
   if (bytes.length <= 44 || bytes.length > MAX_AUDIO_BYTES || bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WAVE") throw new Error("Windows \u043D\u0435 \u0441\u0442\u0432\u043E\u0440\u0438\u043B\u0430 \u0437\u0432\u0443\u043A\u043E\u0432\u0438\u0439 \u0444\u0430\u0439\u043B.");
   return { base64: a.base64, mime: "audio/wav", voice: a.voice, language: a.language };
 }
-async function renderWindowsSpeech(text) {
+function validateSpeechClips(value, count) {
+  if (!Array.isArray(value) || value.length !== count) throw Error("The voice did not return every word.");
+  return value.map((clip) => ({
+    ...validateSpeechAudio(clip),
+    ...typeof clip.provider === "string" && clip.provider.length <= 40 ? { provider: clip.provider } : {},
+    ...typeof clip.fallbackReason === "string" && clip.fallbackReason.length <= 160 ? { fallbackReason: clip.fallbackReason } : {}
+  }));
+}
+async function renderWindowsSpeechBatch(texts) {
   if (process.platform !== "win32") throw new Error("\u041B\u043E\u043A\u0430\u043B\u044C\u043D\u0435 \u043E\u0437\u0432\u0443\u0447\u0435\u043D\u043D\u044F Windows \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0435. \u041C\u043E\u0436\u043D\u0430 \u043E\u0431\u0440\u0430\u0442\u0438 \u0442\u0435\u043A\u0441\u0442\u043E\u0432\u0438\u0439 \u0430\u043D\u0430\u043B\u043E\u0433.");
   const executable = import_node_path.default.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   return new Promise((resolve, reject) => {
@@ -114,34 +125,64 @@ async function renderWindowsSpeech(text) {
         return;
       }
       try {
-        end(void 0, validateSpeechAudio(JSON.parse(output)));
+        end(void 0, validateSpeechClips(JSON.parse(output), texts.length));
       } catch (error) {
         end(error);
       }
     });
-    child.stdin.end(JSON.stringify({ text }), "utf8");
+    child.stdin.end(JSON.stringify({ texts }), "utf8");
   });
 }
+async function renderWindowsSpeech(text) {
+  return (await renderWindowsSpeechBatch([text]))[0];
+}
 var EnglishSpeech = class {
-  constructor(root, generate = renderWindowsSpeech) {
+  constructor(root, generate = renderWindowsSpeech, generateBatch = renderWindowsSpeechBatch) {
     this.root = root;
     this.generate = generate;
+    this.generateBatch = generateBatch;
   }
   pending = /* @__PURE__ */ new Map();
+  wordBatches = /* @__PURE__ */ new Map();
+  failedBatches = /* @__PURE__ */ new Map();
   queue = Promise.resolve();
   synthesize(text) {
     if (typeof text !== "string" || !text.trim() || text.length > 8e3) return Promise.reject(new Error("\u041D\u0435\u043A\u043E\u0440\u0435\u043A\u0442\u043D\u0438\u0439 \u0442\u0435\u043A\u0441\u0442 \u043E\u0437\u0432\u0443\u0447\u0435\u043D\u043D\u044F."));
     const key = (0, import_node_crypto.createHash)("sha256").update("windows-english-v1\0" + text).digest("hex");
-    const existing = this.pending.get(key);
+    return this.cached(key, this.pending, validateSpeechAudio, () => this.generate(text));
+  }
+  synthesizeWords(texts, cloud) {
+    if (!texts.length || texts.length > 12 || texts.some((text) => typeof text !== "string" || !text.trim() || text.length > 240)) return Promise.reject(Error("Invalid words for pronunciation."));
+    const key = (0, import_node_crypto.createHash)("sha256").update(JSON.stringify(["english-word-clips-v1", cloud?.profile ?? "local", texts])).digest("hex");
+    const validate = (value) => validateSpeechClips(value, texts.length);
+    return this.cached(key, this.wordBatches, validate, async () => {
+      if ((this.failedBatches.get(key) ?? 0) > Date.now()) throw Error("Batch voice is temporarily unavailable.");
+      if (cloud) {
+        try {
+          return validate(await cloud.render());
+        } catch {
+        }
+      }
+      try {
+        return (await this.generateBatch(texts)).map((clip) => ({ ...clip, provider: "local", ...cloud ? { fallbackReason: "Cloud word batch unavailable; local Windows voice." } : {} }));
+      } catch (error) {
+        this.failedBatches.set(key, Date.now() + 6e4);
+        if (this.failedBatches.size > 32) this.failedBatches.delete(this.failedBatches.keys().next().value);
+        throw error;
+      }
+    });
+  }
+  cached(key, pending, validate, generate) {
+    const existing = pending.get(key);
     if (existing) return existing;
     const result = this.queue.catch(() => {
     }).then(async () => {
       const file = import_node_path.default.join(this.root, key + ".json");
       try {
-        return validateSpeechAudio(JSON.parse(await (0, import_promises.readFile)(file, "utf8")));
+        return validate(JSON.parse(await (0, import_promises.readFile)(file, "utf8")));
       } catch {
       }
-      const audio = validateSpeechAudio(await this.generate(text));
+      const audio = validate(await generate());
       await (0, import_promises.mkdir)(this.root, { recursive: true });
       await (0, import_promises.writeFile)(file + ".tmp", JSON.stringify(audio), "utf8");
       await (0, import_promises.rename)(file + ".tmp", file);
@@ -149,8 +190,8 @@ var EnglishSpeech = class {
       return audio;
     });
     this.queue = result;
-    this.pending.set(key, result);
-    void result.finally(() => this.pending.delete(key)).catch(() => {
+    pending.set(key, result);
+    void result.finally(() => pending.delete(key)).catch(() => {
     });
     return result;
   }

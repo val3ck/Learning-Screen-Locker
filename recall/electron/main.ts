@@ -346,6 +346,20 @@ async function installHandlers(){
     const text=request?.kind==='luna-reply'
       ? view.attempt?.liveSpeaking?.messages.at(-1)?.text ?? speakingBrief(l).opening
       : englishSpeechText(l,request);
+    if(request.kind==='word'||request.kind==='catch-word'){
+      const words=request.kind==='word'?l.vocabulary.map(word=>word.en):l.listening.catchWords!.map(word=>word.word);
+      const cfg=englishAI.config();
+      const voices=['gemini','groq'].filter(provider=>!!cfg.keys[provider]);
+      const cloud=cfg.cloudVoice&&voices.length?{
+        profile:JSON.stringify([voices,cfg.ttsModel,cfg.automaticFallback!==false]),
+        render:async()=>{
+          const batch=await englishAI.voice(words.map(text=>({speaker:'Narrator',text})),true);
+          return batch.clips.map((base64:string)=>({base64,mime:batch.mime,voice:batch.voice,language:batch.language,provider:batch.provider}));
+        },
+      }:undefined;
+      try{return (await englishSpeech.synthesizeWords(words,cloud))[request.index];}
+      catch{/* A missing local voice or a malformed cloud batch can still use the existing single-word route. */}
+    }
     try{return await englishAI.voice(request.kind==='dialogue'?l.listening.dialogue:[{speaker:'Narrator',text}]);}
     catch{return {...await englishSpeech.synthesize(text),provider:'local',fallbackReason:'Cloud voice unavailable; local Windows voice.'};}
   });

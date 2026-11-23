@@ -1,7 +1,7 @@
 import * as Course from '../src/modules/english/vendor/course';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import AI from '../integration/english-ai.cjs';import P from '../integration/english-ai-prompts.cjs';import Coaching from '../integration/english-coaching.cjs';import Translation from '../integration/english-translation.cjs';
-import {EnglishController,newEnglishDocument} from '../src/modules/english/controller';import {renderAIBlock} from '../src/modules/english/ai-view';import {scoreTone} from '../src/modules/english/answer-enhancements';
+import {EnglishController,newEnglishDocument} from '../src/modules/english/controller';import {renderAIBlock} from '../src/modules/english/ai-view';import {scorePattern,scoreTone} from '../src/modules/english/answer-enhancements';
 import {sentenceContext} from '../src/modules/english/translator-view';
 const temp=()=>fs.mkdtempSync(path.join(os.tmpdir(),'recall-coaching-'));
 const feedback=(b:any)=>({answers:b.answers.map((a:any)=>({key:a.key,relevance:'on_task',scores:{task:4,grammar:3,vocabulary:3,clarity:3,coherence:3},summary:'The main point is clear.',strengths:['A relevant idea is explained.'],conclusion:{skill:'maintain',focus:'Збережи зрозумілу думку.',rule:'Пояснюй одну ідею за раз.',example:'This change saves time.',practice:'Name one useful change.',solution:'Any relevant change.'},corrections:[],nextStep:'Keep one clear main point.'})),blockOverview:{summary:'Головні думки розділу зрозумілі.',strengths:[{text:'Ти формулюєш власні думки.',answerKeys:b.blockContext.map((a:any)=>a.key)}],weaknesses:[],nextStep:'Спробуй новий контекст.'}});
@@ -42,8 +42,17 @@ test('Whole-section AI conclusions include cached answers when only one response
 });
 test('Feedback uses score bands, a single explanation, checked draft, and no premature whole-lesson prompt',()=>{
  assert.equal(scoreTone(25),'low');assert.equal(scoreTone(65),'medium');assert.equal(scoreTone(85),'high');assert.equal(scoreTone(100),'perfect');
+ for(const [score,colour,count] of [[25,'red',3],[65,'amber',7],[85,'green',6]] as const){
+  const patterns=Array.from({length:count},(_,index)=>scorePattern(score,'attempt','vocab-'+index));
+  assert.equal(new Set(patterns).size,count);
+  assert.ok(patterns.every(pattern=>pattern?.startsWith(colour+'-')));
+ }
+ assert.equal(scorePattern(100,'attempt','vocab-0'),undefined);
  const c=new EnglishController(newEnglishDocument());c.start();const s:any=c.document.course.activeSession;s.blockIndex=1;s.answers['vocab-0']='The feature saves time.';s.aiAssessments={vocabulary:{score:65,passed:false,provider:'mock',model:'test',checkedAt:new Date().toISOString(),snapshot:JSON.stringify([['vocab-0',s.answers['vocab-0']]]),answers:[{key:'vocab-0',score:65,passed:true,relevance:'on_task',scores:{task:4,grammar:2,vocabulary:3,clarity:2,coherence:2},summary:'The idea is understandable.',strengths:[],corrections:[{kind:'error',original:'feature',replacement:'feature',explanation:'A test explanation.'}],nextStep:'Check the verb.'}],conclusion:{version:1,total:1,passed:1,strengths:[],priorities:[]}}};
  const html=renderAIBlock(c.view(),'');assert.match(html,/en-score-medium/);assert.match(html,/Actual answer/);assert.ok(!html.includes('Explanation &amp; corrections'));assert.ok(!html.includes('data-en-coaching-prompt'));assert.match(html,/data-en-autosize="short"/);assert.match(html,/en-section-results/);assert.ok(!html.includes('en-ai-tutor'));
+ const pattern=scorePattern(65,s.id,'vocab-0');assert.ok(html.includes(`data-score-pattern="${pattern}"`));
+ s.answers['vocab-0']='An edited draft.';
+ const edited=renderAIBlock(c.view(),'');assert.match(edited,/en-score-medium is-stale/);assert.ok(edited.includes(`data-score-pattern="${pattern}"`));
 });
 test('Local translations select contextual senses, save the dictionary and never call an API',async()=>{
  const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}});ai.generate=async()=>{throw Error('No API calls allowed');};const t=new Translation.EnglishTranslation({root:ai.root,ai,glossary:[]});
