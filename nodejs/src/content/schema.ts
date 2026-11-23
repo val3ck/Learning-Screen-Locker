@@ -22,6 +22,8 @@ export interface Lab {
   dependencies?: Record<string, string>;
   files?: Record<string, string>;
   instructions?: string;
+  testCases?: string[];
+  refactor?: { file: string; goal: string };
 }
 export interface Lesson {
   id: string; moduleId: string; title: string; summary: string;

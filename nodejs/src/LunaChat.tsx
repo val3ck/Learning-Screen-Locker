@@ -394,7 +394,7 @@ export function LunaChat({
                 }
               />
 
-              <details className="node-chat-code-details">
+              <details className="node-chat-code-details" open={section === 'practice' || undefined}>
                 <summary>Додати фрагмент коду або помилку</summary>
                 <textarea
                   id="node-chat-code"
@@ -403,8 +403,12 @@ export function LunaChat({
                   readOnly={!!pendingQuestion}
                   value={current.code}
                   onChange={e => updateCurrent({ code: e.target.value })}
-                  placeholder="Встав код або стек помилки (за бажанням)…"
+                  placeholder="Встав код, власні тести або стек помилки…"
                 />
+                <button type="button" className="button secondary" disabled={!!pendingQuestion || !current.code.trim()}
+                  onClick={() => void submitQuestion('Зроби рев’ю мого коду й доданих тестів. Назви один конкретний фрагмент, який варто спростити, і поясни чому. Окремо підкажи, який граничний випадок варто перевірити, щоб зберегти поведінку. Якщо все читається добре, скажи це. Не переписуй розв’язок і не стверджуй, що запускав тести.', false)}>
+                  Переглянути мій код
+                </button>
               </details>
 
               <div className="node-chat-actions">

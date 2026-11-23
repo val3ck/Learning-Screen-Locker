@@ -154,7 +154,7 @@ export const foundationLessons: Lesson[] = [
     "steps": [
       "Визнач допустимі форми до числового перетворення.",
       "Відхили null, boolean, порожній рядок, пробіли, дроби, NaN та нескінченність.",
-      "Перевір fallback за тими самими числовими межами, коли значення відсутнє."
+      "Перевір fallback за тими самими межами. Сам експортуй normalizeLimit з exercise.js та імпортуй її у своєму тесті."
     ],
     "hints": [
       "Перевір value === undefined окремо.",
@@ -203,7 +203,19 @@ export const foundationLessons: Lesson[] = [
     },
     "lab": {
       "language": "js",
-      "starter": "export function normalizeLimit(value, fallback = 20) {\n  throw new Error('Реалізуй нормалізацію за контрактом');\n}\n",
+      "starter": "function normalizeLimit(value, fallback = 20) {\n  throw new Error('Реалізуй нормалізацію за контрактом');\n}\n\n// Експортуй normalizeLimit для своїх тестів.\n",
+      "testCases": [
+        "Передай рядок із цифр і перевір, що отримуєш відповідне число.",
+        "Передай undefined із власним fallback та перевір повернене значення.",
+        "Передай null або число на один крок за межами діапазону й перевір, що функція кидає помилку."
+      ],
+      "refactor": {
+        "file": "refactor.js",
+        "goal": "Спрости formatLimit. Спершу напиши тести для undefined і 0, щоб зафіксувати, коли спрацьовує значення за замовчуванням. Потім прибери зайві гілки, зберігши поведінку також для null. Покажи Luna код і тести після змін."
+      },
+      "files": {
+        "refactor.js": "export function formatLimit(value) {\n  let isMissing = false;\n  if (value === undefined) {\n    isMissing = true;\n  } else {\n    isMissing = false;\n  }\n  if (isMissing) {\n    const label = 'Limit: ' + 20;\n    return label;\n  } else {\n    const label = 'Limit: ' + value;\n    return label;\n  }\n}\n"
+      },
       "solution": "export function normalizeLimit(value, fallback = 20) {\n  const raw = value === undefined ? fallback : value;\n  if (typeof raw !== 'number' && (typeof raw !== 'string' || !/^\\d+$/.test(raw))) throw new TypeError('Очікується ціле число');\n  const result = Number(raw);\n  if (!Number.isInteger(result) || result < 1 || result > 100) throw new RangeError('Межі 1…100');\n  return result;\n}\n",
       "tests": "test('valid numeric forms and default', () => {\n  assert.equal(subject.normalizeLimit(undefined),20);\n  assert.equal(subject.normalizeLimit(undefined,40),40);\n  assert.equal(subject.normalizeLimit('001'),1);\n  assert.equal(subject.normalizeLimit(100),100);\n});\ntest('no accidental coercion or partial parsing', () => {\n  for(const value of [null,true,false,'',' ','1x','1.5',0,101,-1,NaN,Infinity,{},[]]) {\n    assert.throws(()=>subject.normalizeLimit(value));\n  }\n});\ntest('an invalid default also fails', () => {\n  assert.throws(()=>subject.normalizeLimit(undefined,0));\n  assert.throws(()=>subject.normalizeLimit(undefined,Infinity));\n});\n"
     }
@@ -224,7 +236,7 @@ export const foundationLessons: Lesson[] = [
     "steps": [
       "Збережи поточне значення в області фабрики.",
       "increment повертає нове значення, value — поточне, reset повертає й відновлює initial.",
-      "Приймай лише безпечні цілі initial та step; при переповненні збережи попередній стан."
+      "Приймай лише безпечні цілі initial та step. При переповненні збережи стан. Сам експортуй createCounter та імпортуй її у власному тесті."
     ],
     "hints": [
       "Методи можуть замикати локальну змінну без this.",
@@ -270,7 +282,12 @@ export const foundationLessons: Lesson[] = [
     },
     "lab": {
       "language": "js",
-      "starter": "export function createCounter(initial = 0, step = 1) {\n  throw new Error('Реалізуй фабрику незалежних лічильників');\n}\n",
+      "starter": "function createCounter(initial = 0, step = 1) {\n  throw new Error('Реалізуй фабрику незалежних лічильників');\n}\n\n// Експортуй createCounter для своїх тестів.\n",
+      "testCases": [
+        "Створи два лічильники, зміни перший і перевір, що другий зберіг свій початковий стан.",
+        "Виклич окремо збережений increment без об’єкта, потім перевір reset.",
+        "Спробуй збільшити значення від MAX_SAFE_INTEGER та перевір, що помилка не змінила стан."
+      ],
       "solution": "export function createCounter(initial = 0, step = 1) {\n  if (!Number.isSafeInteger(initial) || !Number.isSafeInteger(step)) throw new TypeError('Потрібні безпечні цілі');\n  let current = initial;\n  return {\n    increment() {\n      const candidate = current + step;\n      if (!Number.isSafeInteger(candidate)) throw new RangeError('Переповнення');\n      current = candidate;\n      return current;\n    },\n    value: () => current,\n    reset: () => { current = initial; return current; }\n  };\n}\n",
       "tests": "test('closure state and detached operations', () => {\n  const counter=subject.createCounter(5,2);\n  const increment=counter.increment;\n  assert.equal(increment(),7);\n  assert.equal(increment(),9);\n  assert.equal(counter.value(),9);\n  assert.equal(counter.reset(),5);\n});\ntest('factories do not share state', () => {\n  const a=subject.createCounter(), b=subject.createCounter();\n  a.increment(); a.increment();\n  assert.equal(b.value(),0);\n  assert.equal(a.value(),2);\n});\ntest('invalid input and overflow leave state intact', () => {\n  assert.throws(()=>subject.createCounter(0,0.5),TypeError);\n  const counter=subject.createCounter(Number.MAX_SAFE_INTEGER,1);\n  assert.throws(()=>counter.increment(),RangeError);\n  assert.equal(counter.value(),Number.MAX_SAFE_INTEGER);\n});\n"
     }
@@ -291,7 +308,7 @@ export const foundationLessons: Lesson[] = [
     "steps": [
       "За один прохід перевір записи й накопич суми.",
       "Для кожного клієнта збережи число в Map.",
-      "Відхиляй переповнення загальної або групової суми, не змінюй orders."
+      "Відхиляй переповнення загальної або групової суми. Збережи orders як є. Сам експортуй groupTotals та імпортуй її у власному тесті."
     ],
     "hints": [
       "Початкове значення групи — map.get(customer) ?? 0.",
@@ -340,7 +357,12 @@ export const foundationLessons: Lesson[] = [
     },
     "lab": {
       "language": "js",
-      "starter": "export function groupTotals(orders) {\n  throw new Error('Реалізуй групування без мутації');\n}\n",
+      "starter": "function groupTotals(orders) {\n  throw new Error('Реалізуй групування без мутації');\n}\n\n// Експортуй groupTotals для своїх тестів.\n",
+      "testCases": [
+        "Передай два замовлення одного клієнта й одне іншого. Перевір суми в Map і загальну суму.",
+        "Збережи копію вхідних замовлень. Після виклику порівняй із нею вхідний масив і записи.",
+        "Додай випадок з переповненням суми або зі значенням, яке порушує контракт."
+      ],
       "solution": "export function groupTotals(orders) {\n  if (!Array.isArray(orders)) throw new TypeError('Очікується масив');\n  const byCustomer = new Map();\n  let totalCents = 0;\n  for (const order of orders) {\n    if (!order || typeof order.customer !== 'string' || order.customer.trim() === '' ||\n        !Number.isSafeInteger(order.amountCents) || order.amountCents < 0) throw new TypeError('Некоректне замовлення');\n    const group = (byCustomer.get(order.customer) ?? 0) + order.amountCents;\n    const total = totalCents + order.amountCents;\n    if (!Number.isSafeInteger(group) || !Number.isSafeInteger(total)) throw new RangeError('Переповнення');\n    byCustomer.set(order.customer, group);\n    totalCents = total;\n  }\n  return { byCustomer, totalCents };\n}\n",
       "tests": "test('groups duplicates and preserves input', () => {\n  const rows=Object.freeze([Object.freeze({customer:'a',amountCents:200}),Object.freeze({customer:'b',amountCents:0}),Object.freeze({customer:'a',amountCents:150})]);\n  const result=subject.groupTotals(rows);\n  assert.ok(result.byCustomer instanceof Map);\n  assert.deepEqual([...result.byCustomer],[['a',350],['b',0]]);\n  assert.equal(result.totalCents,350);\n  assert.equal(rows[0].amountCents,200);\n});\ntest('empty and unusual customer keys', () => {\n  const empty=subject.groupTotals([]);\n  assert.equal(empty.totalCents,0);\n  assert.equal(empty.byCustomer.size,0);\n  assert.equal(subject.groupTotals([{customer:'__proto__',amountCents:5}]).byCustomer.get('__proto__'),5);\n});\ntest('invalid amounts and overflow', () => {\n  assert.throws(()=>subject.groupTotals([{customer:'a',amountCents:NaN}]),TypeError);\n  assert.throws(()=>subject.groupTotals([{customer:' ',amountCents:1}]),TypeError);\n  assert.throws(()=>subject.groupTotals([{customer:'a',amountCents:Number.MAX_SAFE_INTEGER},{customer:'b',amountCents:1}]),RangeError);\n});\n"
     }

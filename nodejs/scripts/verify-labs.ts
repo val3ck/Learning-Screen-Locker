@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve, join, sep, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { lessons } from '../src/content/catalog';
-import { labFiles } from '../src/lib/labs';
+import { labFiles, learnerWritesTests } from '../src/lib/labs';
 
 const root = process.cwd();
 const cache = resolve(root, '.lab-check');
@@ -16,7 +16,7 @@ function verify(id: string, useSolution: boolean) {
   const lesson = lessons.find(l => l.id === id)!;
   const folder = join(temp, id, useSolution ? 'reference' : 'starter');
   mkdirSync(folder, { recursive: true });
-  for (const [file, body] of Object.entries(labFiles(lesson, useSolution))) {
+  for (const [file, body] of Object.entries(labFiles(lesson, useSolution ? 'check-reference' : 'check-starter'))) {
     const path = resolve(folder, file);
     if (!path.startsWith(folder + sep)) throw new Error('Unsafe lab filename');
     mkdirSync(dirname(path), { recursive: true });
@@ -24,7 +24,8 @@ function verify(id: string, useSolution: boolean) {
   }
   try {
     if (lesson.lab.language !== 'js') execFileSync(process.execPath, [tsc, '--project', join(folder, 'tsconfig.json')], { cwd: folder, stdio: 'pipe', timeout: 20000 });
-    execFileSync(process.execPath, ['--test', lesson.lab.language === 'js' ? 'exercise.test.mjs' : 'build/exercise.test.js'], { cwd: folder, stdio: 'pipe', timeout: 20000 });
+    const testFile = lesson.lab.language === 'js' ? (learnerWritesTests(lesson) ? 'exercise.test.js' : 'exercise.test.mjs') : 'build/exercise.test.js';
+    execFileSync(process.execPath, ['--test', testFile], { cwd: folder, stdio: 'pipe', timeout: 20000 });
     return { ok: true, error: '' };
   } catch (e) { const error = e as { stdout?: Buffer; stderr?: Buffer; message?: string }; return { ok: false, error: (String(error.stdout ?? '') + String(error.stderr ?? '')) || error.message || '' }; }
 }
