@@ -22,6 +22,8 @@ export function mergeProgress(base: Progress, current: Progress, edited: Progres
     const remote = current.lessons[id] ?? emptyLesson();
     if (equal(original, local)) continue;
     const completion = remote.completedAt || local.completedAt;
+    const codeReview = local.codeReview && (!remote.codeReview ||
+      Date.parse(local.codeReview.checkedAt) > Date.parse(remote.codeReview.checkedAt)) ? local.codeReview : remote.codeReview;
     next.lessons[id] = {
       read: remote.read || local.read,
       quizPassed: remote.quizPassed || local.quizPassed,
@@ -31,6 +33,7 @@ export function mergeProgress(base: Progress, current: Progress, edited: Progres
       completedAt: completion,
       nextReviewAt: original.nextReviewAt !== local.nextReviewAt && local.nextReviewAt ? local.nextReviewAt : remote.nextReviewAt,
       reviewCount: original.reviewCount !== local.reviewCount ? local.reviewCount : remote.reviewCount,
+      ...(codeReview && { codeReview }),
     };
   }
   for (const [id, checks] of Object.entries(edited.projects)) {

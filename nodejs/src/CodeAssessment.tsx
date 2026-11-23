@@ -1,7 +1,10 @@
 import { Fragment, useId, useState, type FormEvent, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { FileCode2 } from 'lucide-react';
-import { NODE_REVIEW_LIMIT, reviewLines, type CodeAssessment as Assessment, type CodeFinding } from '../../shared/node-code-review';
+import {
+  isCodeAssessment, NODE_REVIEW_LIMIT, NODE_REVIEW_PASS, reviewLines,
+  type CodeAssessment as Assessment, type CodeFinding,
+} from '../../shared/node-code-review';
 import './code-assessment.css';
 
 async function assessCode(lesson: string, code: string): Promise<Assessment> {
@@ -22,8 +25,9 @@ async function assessCode(lesson: string, code: string): Promise<Assessment> {
 }
 
 function FindingDetail({ finding }: { finding: CodeFinding }) {
+  const labels = { blocking: 'Основна вимога', error: 'Помилка', minor: 'Невеликий недолік', suggestion: 'Покращення' };
   return <>
-    <p><strong>{finding.severity === 'error' ? 'Помилка' : 'Покращення'}</strong> · {finding.explanation}</p>
+    <p><strong>{labels[finding.severity]}</strong>{finding.deduction > 0 && <> (−{finding.deduction})</>} · {finding.explanation}</p>
     {finding.replacement && <><span>Запропонована заміна</span><pre>{finding.replacement}</pre></>}
   </>;
 }
@@ -75,7 +79,7 @@ function AnnotatedCode({ code, findings }: { code: string; findings: CodeFinding
             const isActive = active?.issue === issue;
             offset = end;
             return <Fragment key={start}>
-              {prefix}<button type="button" className={`code-review-mark is-${issue.severity}`}
+              {prefix}<button type="button" className={`code-review-mark is-${issue.severity === 'blocking' || issue.severity === 'error' ? 'error' : 'suggestion'}`}
                 aria-describedby={isActive ? tooltipId : undefined}
                 onMouseEnter={event => {
                   const anchor = event.currentTarget;
@@ -103,7 +107,7 @@ function AnnotatedCode({ code, findings }: { code: string; findings: CodeFinding
   </>;
 }
 
-export function CodeReview({ lesson }: { lesson: string }) {
+export function CodeReview({ lesson, onAssessment }: { lesson: string; onAssessment: (score: number | null) => void }) {
   const headingId = useId();
   const inputId = useId();
   const [code, setCode] = useState('');
@@ -114,12 +118,14 @@ export function CodeReview({ lesson }: { lesson: string }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (pending || !code.trim() || code.length > NODE_REVIEW_LIMIT) return;
+    if (pending || current || !code.trim() || code.length > NODE_REVIEW_LIMIT) return;
     setError('');
     setPending(true);
     try {
       const result = await assessCode(lesson, code);
+      if (!isCodeAssessment(result)) throw Error('Для нової рубрики потрібен перезапуск Recall або локального сервера Backend Path.');
       setReview({ code, result });
+      onAssessment(result.score);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Luna зараз недоступна.';
       setError(message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ''));
@@ -130,14 +136,14 @@ export function CodeReview({ lesson }: { lesson: string }) {
 
   return <section className="code-review" aria-labelledby={headingId}>
     <h3 id={headingId}><FileCode2 size={19} aria-hidden="true" /> Оцінка коду від Luna</h3>
-    <p>Встав свій код. Luna звірить його з умовою уроку й дасть оцінку від 0 до 100.</p>
+    <p>Встав реалізацію для перевірки. Для завершення уроку потрібно щонайменше {NODE_REVIEW_PASS}/100.</p>
     <form onSubmit={submit}>
       <label htmlFor={inputId}>Твій код</label>
       <textarea id={inputId} rows={8} spellCheck={false} autoCapitalize="off"
         aria-describedby={inputId + '-hint'} value={code} onChange={event => setCode(event.target.value)} />
       <div className="code-review-actions">
-        <button className="button primary" type="submit" disabled={pending || !code.trim() || code.length > NODE_REVIEW_LIMIT}>
-          {pending ? 'Оцінюємо…' : 'Оцінити код'}
+        <button className="button primary" type="submit" disabled={pending || !!current || !code.trim() || code.length > NODE_REVIEW_LIMIT}>
+          {pending ? 'Оцінюємо…' : current ? 'Цю версію оцінено' : 'Оцінити код'}
         </button>
         <small id={inputId + '-hint'} data-over-limit={code.length > NODE_REVIEW_LIMIT}>
           {code.length.toLocaleString('uk-UA')} / {NODE_REVIEW_LIMIT.toLocaleString('uk-UA')} символів
@@ -150,13 +156,14 @@ export function CodeReview({ lesson }: { lesson: string }) {
       {!pending && review && !current && <p className="code-review-status">Ти змінив код. Оціни нову версію, щоб оновити коментарі.</p>}
       {!pending && current && <div className="code-review-result">
         <div className="code-review-summary">
-          <div className="code-review-score"><strong>{current.score}</strong><span> / 100</span></div>
+          {current.score !== null && <div className="code-review-score"><strong>{current.score}</strong><span> / 100</span></div>}
           <div>
-            <h4>{current.findings.length ? 'Що можна покращити' : 'Luna не знайшла конкретних покращень'}</h4>
+            <h4>{current.score === null ? 'Потрібен код реалізації' :
+              current.score >= NODE_REVIEW_PASS ? 'Прохідний бал' : 'Потрібне доопрацювання'}</h4>
             <p>{current.summary}</p>
           </div>
         </div>
-        <small className="code-review-method">Оцінка ШІ за кодом у полі. Тести не запускалися.</small>
+        <small className="code-review-method">Статичний аналіз · пропозиції без штрафу{current.cached && ' · збережене рев’ю'}</small>
         {current.findings.some(issue => issue.location) && <AnnotatedCode code={code} findings={current.findings} />}
         {current.findings.length > 0 && <details className="code-review-notes" open={current.findings.some(issue => !issue.location)}>
           <summary>Усі зауваження ({current.findings.length})</summary>

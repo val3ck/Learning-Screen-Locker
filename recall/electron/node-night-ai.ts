@@ -1,5 +1,6 @@
 import {cleanLunaText,forLunaModel,lunaOptions,lunaQuestion,type LunaModel} from '../../shared/luna-chat';
 import { makeCodeReviewPrompt, readCodeAssessment } from '../../shared/node-code-review';
+import { CodeReviewCache } from '../../shared/node-code-review-cache';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { safeStorage } from 'electron';
@@ -88,6 +89,7 @@ export class NodeNightAI {
   private readonly sharedClient: any;
   private readonly ownClient: any;
   private readonly cache = new Map<string, string>();
+  private readonly reviewCache = new CodeReviewCache();
   private recent: { question: string; answer: string }[] = [];
   private messages: NodeChatMessage[] = [];
   private scope = '';
@@ -143,15 +145,23 @@ export class NodeNightAI {
     if (Date.now() < this.retryAt) throw Error('Luna тимчасово недоступна. Спробуй через хвилину.');
   }
 
-  async review(code: string, context: unknown) {
-    this.assertAvailable();
+  async review(code: string, lesson: Parameters<typeof makeCodeReviewPrompt>[1]) {
     if (this.demo) throw Error('Оцінювання коду доступне у звичайній сесії Node.js.');
     const config = this.englishAI.config();
     const separateKey = this.envKey || this.separateKey;
     const keys = [...Object.values(config.keys) as string[], separateKey];
-    const prompt = makeCodeReviewPrompt(code, context, keys);
-    const result = await this.generate(prompt, config, this.modelChoice(), separateKey);
-    return readCodeAssessment(result, code, keys);
+    const choice = this.modelChoice();
+    const provider = choice?.provider || 'openai';
+    const routing = forLunaModel({ ...config, models: { ...config.models, openai: model } }, choice);
+    const prompt = makeCodeReviewPrompt(code, lesson, keys);
+    const cacheKey = this.reviewCache.key(prompt, [[provider, routing.models[provider]]]);
+    const cached = await this.reviewCache.read(cacheKey);
+    if (cached) return cached;
+    this.assertAvailable();
+    const raw = await this.generate(prompt, config, choice, separateKey);
+    const assessment = readCodeAssessment(raw, code, keys);
+    await this.reviewCache.save(cacheKey, assessment);
+    return assessment;
   }
 
   async ask(rawQuestion: string, code: string, context: unknown, plan: string, lessonScope = '', explicitBtw = false, options?:unknown) {

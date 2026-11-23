@@ -1,11 +1,13 @@
 import { lessons, lessonById, modules, prerequisitesFor } from '../content/catalog';
 import type { Lesson } from '../content/schema';
+import { NODE_REVIEW_PASS } from '../../../shared/node-code-review';
 
 export const STORAGE_KEY = 'backend-path.strong-junior.v1';
 export type Step = 'lecture' | 'practice' | 'check';
 export interface LessonProgress {
   read: boolean; checks: number[]; quizPassed: boolean; notes: string;
   step: Step; completedAt: string | null; nextReviewAt: string | null; reviewCount: number;
+  codeReview?: { score: number | null; checkedAt: string };
 }
 export interface Progress {
   version: 1;
@@ -34,9 +36,13 @@ export function updateLesson(progress: Progress, id: string, update: Partial<Les
   return { ...progress, lessons: { ...progress.lessons, [id]: { ...getLessonProgress(progress, id), ...update } }, lastLessonId: id };
 }
 export const requiredPracticeChecks = (lesson: Lesson) => Math.min(2, lesson.criteria.length);
+export const passedCodeReview = (lesson: LessonProgress) =>
+  typeof lesson.codeReview?.score === 'number' && lesson.codeReview.score >= NODE_REVIEW_PASS;
+
 export function canComplete(progress: Progress, lesson: Lesson) {
   const p = getLessonProgress(progress, lesson.id);
-  return isUnlocked(progress, lesson) && p.read && p.checks.length >= requiredPracticeChecks(lesson);
+  return isUnlocked(progress, lesson) && p.read && p.checks.length >= requiredPracticeChecks(lesson) &&
+    (!!p.completedAt || passedCodeReview(p));
 }
 export function completeLesson(progress: Progress, lesson: Lesson, now = new Date()): Progress {
   if (!canComplete(progress, lesson) || isComplete(progress, lesson.id)) return progress;
@@ -70,6 +76,14 @@ export function parseProgress(input: unknown): Progress {
     const legacyDone = raw.quizPassed && checks.length === lesson.criteria.length;
     if (raw.completedAt && !lessonDone && !legacyDone) throw new Error(`Завершений урок ${id} має неповну перевірку.`);
     clean.lessons[id] = { read: raw.read, quizPassed: raw.quizPassed, notes: raw.notes, step: raw.step as Step, checks, reviewCount: Number(raw.reviewCount), completedAt: raw.completedAt as string | null, nextReviewAt: raw.nextReviewAt as string | null };
+    if (raw.codeReview !== undefined) {
+      const evidence = raw.codeReview;
+      if (!object(evidence) || !date(evidence.checkedAt) || (evidence.score !== null &&
+          (typeof evidence.score !== 'number' || !Number.isInteger(evidence.score) || evidence.score < 0 || evidence.score > 100))) {
+        throw new Error(`Некоректна оцінка коду для уроку ${id}.`);
+      }
+      clean.lessons[id].codeReview = { score: evidence.score, checkedAt: evidence.checkedAt };
+    }
   }
   for (const [id, checks] of Object.entries(input.projects)) {
     const module = modules.find(m => m.id === id);

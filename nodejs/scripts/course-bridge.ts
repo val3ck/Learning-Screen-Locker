@@ -1,5 +1,6 @@
 import {forLunaModel,lunaModel,lunaOptions,lunaQuestion} from '../../shared/luna-chat';
 import {isReviewCode, makeCodeReviewPrompt, readCodeAssessment} from '../../shared/node-code-review';
+import {backendPathDataDir, CodeReviewCache} from '../../shared/node-code-review-cache';
 import { constants, mkdirSync, readFileSync, writeFileSync, renameSync, copyFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -185,11 +186,11 @@ export function parseBtwQuestion(rawQuestion: string, explicitBtw?: boolean): { 
 
 export function createCourseBridge(
   root: string,
-  dataDir = process.env.BACKEND_PATH_DATA_DIR ||
-    join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Backend Path'),
+  dataDir = backendPathDataDir(),
   customGenerator?: (prompt: { system: string; user: string; btw: boolean }) => Promise<{ answer?: string; assessment?: unknown; provider?: string; model?: string }>,
 ) {
   const file = join(dataDir, 'progress-v1.json');
+  const reviewCache = new CodeReviewCache(dataDir);
   let recovered = false;
   let chatScope = '';
   let chatMessages: ChatMessage[] = [];
@@ -330,21 +331,23 @@ export function createCourseBridge(
           const keys = Object.values(config.keys);
           let prompt;
           try {
-            const {title, summary, task, criteria} = lesson;
-            prompt = makeCodeReviewPrompt(code, {title, summary, task, criteria}, keys);
+            prompt = makeCodeReviewPrompt(code, lesson, keys);
           } catch (error) {
             send(400, { message: (error as Error).message });
             return;
           }
           chatPending = true;
           try {
-            if (customGenerator) {
-              const out = await customGenerator({ ...prompt, btw: false });
-              send(200, readCodeAssessment(out.assessment, code, keys));
-              return;
-            }
-            const review = await generate(config, prompt, raw => readCodeAssessment(raw, code, keys));
-            send(200, review.result);
+            const routes = providerRoutes(config).map(id => [id, config.models[id] || DEFAULT_MODELS[id]]);
+            const key = reviewCache.key(prompt, customGenerator ? 'test' : routes);
+            const cached = await reviewCache.read(key);
+            if (cached) { send(200, cached); return; }
+            const readReview = (raw: unknown) => readCodeAssessment(raw, code, keys);
+            const result = customGenerator
+              ? readReview((await customGenerator({ ...prompt, btw: false })).assessment)
+              : (await generate(config, prompt, readReview)).result;
+            await reviewCache.save(key, result);
+            send(200, result);
           } catch {
             send(503, { message: 'Luna не змогла оцінити код. Перевір активну модель і ключ або повтори запит пізніше.' });
           } finally {

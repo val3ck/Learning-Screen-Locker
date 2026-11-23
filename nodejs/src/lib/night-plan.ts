@@ -19,7 +19,8 @@ export function nightPlan(progress: Progress) {
   const completedModules = modules.filter(module => completedByModule.get(module.id) === byModule.get(module.id)!.length).length;
   if (!lesson) return { candidate: null, completed, completedModules, totalModules: modules.length, lessonCounts };
   const saved = getLessonProgress(progress, lesson.id);
-  const section: Step = saved.read ? 'practice' : 'lecture';
+  const section: Step = !saved.read ? 'lecture' :
+    saved.checks.length < requiredPracticeChecks(lesson) ? 'practice' : 'check';
   const minutes = section === 'lecture' ? lesson.lectureMinutes : lesson.practiceMinutes;
   const module = moduleById.get(lesson.moduleId)!;
   const peers = byModule.get(module.id)!;
@@ -27,7 +28,8 @@ export function nightPlan(progress: Progress) {
     candidate: {
       id: lesson.id + '/' + section,
       lessonId: lesson.id, lesson: lesson.title, module: module.title, section, minutes,
-      title: section === 'lecture' ? 'Прочитай лекцію' : 'Виконай критерії практики й заверши урок',
+      title: section === 'lecture' ? 'Прочитай лекцію' :
+        section === 'practice' ? 'Виконай критерії практики' : 'Оціни код і заверши урок',
       criteriaRequired: requiredPracticeChecks(lesson),
       criteriaDone: saved.checks.length, criteriaTotal: lesson.criteria.length,
       lessonsDone: peers.filter(item => isComplete(progress, item.id)).length, lessonsTotal: peers.length,
