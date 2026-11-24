@@ -112,7 +112,7 @@ import * as course from './course';
     }
     requirements(block=course.BLOCKS[this.current().blockIndex].id){
       const s=this.current(),l=s.lesson,has=key=>!!s.answers[key]?.trim(),passed=key=>!!s.results[key]?.correct;
-      if(block==='speaking'&&s.liveSpeaking)return s.liveSpeaking.status==='ready'&&s.liveSpeaking.clearReplies>=2;
+      if(block==='speaking'&&s.liveSpeaking)return s.liveSpeaking.status==='wrapped'||s.liveSpeaking.status==='ready'&&s.liveSpeaking.clearReplies>=2;
       if(l.productionMode==='ai-opinion-v1'&&['review','vocabulary','reading','speaking','writing'].includes(block)){if(block==='reading'&&!l.reading.questions.every((_,i)=>passed('reading-'+i)))return false;return course.learning.aiPassed(s,block);}
       if(l.guidedTasks?.version===1){const guided=area=>course.learning.guidedPassed(s,area);if(block==='vocabulary')return l.vocabulary.every((_,i)=>passed('vocab-'+i))&&guided('vocabulary');if(block==='reading')return l.reading.questions.every((_,i)=>passed('reading-'+i))&&guided('reading');if(block==='speaking')return guided('speaking');if(block==='writing')return guided('writing');}
       switch(block){

@@ -30,7 +30,7 @@ import * as EnglishCourse from '../src/modules/english/vendor/course';
 import * as EnglishLearning from '../src/modules/english/vendor/learning';
 import Language from '../integration/english-language.cjs';
 import {englishSpeechText} from '../src/modules/english/speech-content';
-import {dialogueKey,isLunaContext,speakingBrief} from '../src/modules/english/dialogue';
+import {dialogueKey,isLunaContext,speakingBrief,speakingQuestion,SPEAKING_INPUT_LIMIT} from '../src/modules/english/dialogue';
 import {speakWithLuna} from './english-dialogue';
 import {eveningSchedule,tickEvening,snoozeEvening,type EveningSchedule} from '../src/core/evening';
 import EnglishInstaller from '../integration/install-english.cjs';
@@ -396,7 +396,8 @@ async function installHandlers(){
           const audio=englishHost.loadAudio(id+':'+key);
           if(!audio)throw Error('Record your reply first.');
           const result=await englishAI.transcribe({audio:Buffer.from(audio.bytes).toString('base64'),mimeType:audio.mime});
-          return {text:result.transcript.text.slice(0,1200),key,attemptId:id};
+          const text=result.transcript.text;
+          return {text:text.slice(0,SPEAKING_INPUT_LIMIT),truncated:text.length>SPEAKING_INPUT_LIMIT,key,attemptId:id};
         }
         const next=await speakWithLuna(englishAI,lesson,draft.trim(),s.liveSpeaking,demo||smoke);
         const view=englishHost.aiChange(c=>{
@@ -418,16 +419,18 @@ async function installHandlers(){
     if(request.action==='hint'){
       if(request.context!==undefined&&!isLunaContext(request.context))throw Error('Invalid chat context.');
       const attemptId=s?.id,runId=englishHost.controller.snapshot()?.id;
-      if(area==='speaking'&&request.targetKey===dialogueKey(s?.liveSpeaking)&&s){
-        const brief=speakingBrief(lesson),answer={key:request.targetKey,task:brief.goal+' '+brief.opening,text:s.answers[request.targetKey]||''};
-        bundle.answers=[answer];
+      if(area==='speaking'&&s){
+        const brief=speakingBrief(lesson),key=dialogueKey(s.liveSpeaking),recap=s.liveSpeaking?.recap??{};
+        const task=[brief.facts,brief.goal,'Current question: '+speakingQuestion(lesson,s.liveSpeaking),
+          'Learner’s confirmed excerpts: '+JSON.stringify(recap)].join(' ');
+        bundle.answers=[{key,task,text:s.answers[key]||''}];
       }
       const context=Coaching.tutorContext(bundle,practice?{lastAnswerKey:'practice',aiAssessments:{practice:englishHost.controller.snapshot()?.payload.practice?.aiAssessment}}:s,request.targetKey);
       const opts=lunaOptions(request.luna);
       const question=lunaQuestion(request.question,'Share one useful English tip related to this exercise.');
       const config=englishAI.config();
       const keys=Object.values(config.keys) as string[];
-      context.conversation=question.btw?[]:request.luna?opts.history.map(turn=>({...turn,text:cleanLunaText(turn.text,450,keys)})):request.context;
+      context.conversation=question.btw||area==='speaking'?[]:request.luna?opts.history.map(turn=>({...turn,text:cleanLunaText(turn.text,450,keys)})):request.context;
       context.lunaMinimal=opts.minimal;
       context.lunaBtw=question.btw;
       const result=demo||smoke?{hint:{

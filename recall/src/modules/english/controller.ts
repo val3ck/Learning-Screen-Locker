@@ -4,7 +4,7 @@ import * as EngineModule from './vendor/engine';
 import * as Course from './vendor/course';
 import * as Learning from './vendor/learning';
 import {practiceTask,practiceMessage} from './practice';
-import {isSpeakingDialogue,type SpeakingDialogue} from './dialogue';
+import {canWrapSpeaking,isSpeakingDialogue,speakingDone,type SpeakingDialogue} from './dialogue';
 import {kyivDayKey} from '../../core/calendar';
 import {envelopeValid,type LearningAction,type LearningController,type LearningEnvelope,type LearningOutcome,type ActivityState} from '../../core/learning';
 import type {EnglishDocument,EnglishCourseState,EnglishDay,EnglishRunPayload,EnglishView,EnglishAttempt,EnglishPractice,EnglishChoice,EnglishLanguageReport,EnglishLesson} from './types';
@@ -61,7 +61,7 @@ export class EnglishController implements LearningController {
   acceptSpeakingDialogue(next:SpeakingDialogue){
     const attempt=this.current(),run=this.snapshot();
     if(!attempt||run?.status!=='active'||run?.payload.phase!=='lesson'||attempt.lesson.blocks[attempt.blockIndex]?.id!=='speaking')throw Error('Open the Speaking block first.');
-    if(!isSpeakingDialogue(next)||next.turn!==(attempt.liveSpeaking?.turn??0)+1||attempt.liveSpeaking?.status==='ready')throw Error('The conversation changed.');
+    if(!isSpeakingDialogue(next)||next.turn!==(attempt.liveSpeaking?.turn??0)+1||speakingDone(attempt.liveSpeaking))throw Error('The conversation changed.');
     attempt.liveSpeaking=next;
     this.reachBoundary();this.changed();
   }
@@ -220,6 +220,11 @@ export class EnglishController implements LearningController {
     if(key.length>150||action.value&&action.value.length>20000)throw new Error('The answer is too long.');
     if(['__proto__','prototype','constructor'].includes(key))throw new Error('Invalid answer key.');
     switch(action.type){
+      case 'finish-speaking':{
+        if(s.lesson.blocks[s.blockIndex]?.id!=='speaking'||!canWrapSpeaking(s.liveSpeaking))throw Error('Finish a few Speaking replies first.');
+        s.liveSpeaking={...s.liveSpeaking,status:'wrapped'};
+        break;
+      }
       case 'import-personal-review':this.engine.importPersonalReview(action.value||'');break;
       case 'use-transcript':{const t=(s as any).proposedTranscripts?.[key];if(!t?.text?.trim())throw new Error('No usable transcript available. Type your answer or retry ASR.');(s as any).transcriptHistory=[...((s as any).transcriptHistory||[]),{key,text:s.answers[key]||'',at:new Date().toISOString()}].slice(-30);this.engine.setAnswer(key,t.text,'voice');delete (s as any).recordingNeedsTranscript?.[key];t.confirmed=true;break;}
       case 'select-block':{const index=Number(action.value);if(!Number.isInteger(index)||index<0||index>7)throw new Error('Invalid block.');s.blockIndex=index;break;}

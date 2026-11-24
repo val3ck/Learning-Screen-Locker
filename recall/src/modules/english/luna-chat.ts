@@ -76,6 +76,7 @@ export class EnglishLunaChat {
     const run=view.run,attempt=view.attempt;
     const active=run?.status==='active'&&!run.endedAt&&run.payload.pauseUntil===undefined&&!view.readonly;
     const area=run?.payload.phase==='reinforcement'?'practice':run?.payload.phase==='lesson'&&attempt?view.lesson.blocks[attempt.blockIndex]?.id:'';
+    this.widget.classList.toggle('is-speaking',area==='speaking');
     this.widget.hidden=!active||!area||area==='summary';
     if(this.widget.hidden)return;
     const scope=(attempt?.id||run!.id)+':'+area+(area==='practice'?':'+run!.payload.practice?.id:'');
@@ -116,7 +117,7 @@ export class EnglishLunaChat {
     log.hidden=!messages.length;
     log.scrollTop=log.scrollHeight;
     const option=[...this.select.options].find(o=>o.value===this.key());
-    this.widget.querySelector('.en-luna-context')!.textContent=this.select.value==='auto'
+    this.widget.querySelector('.en-luna-context')!.textContent=this.area==='speaking'?'Uses the current question and speaking recap.':this.select.value==='auto'
       ?`Active: ${option?.text||'Whole block'}`
       :this.select.value==='__block__'?'Context: all tasks in this block':'Pinned to this task';
     this.widget.querySelector<HTMLButtonElement>('[type=submit]')!.disabled=this.pending;
@@ -132,7 +133,7 @@ export class EnglishLunaChat {
     this.status('Luna is thinking…');
     this.update();
     try {
-      const response=await this.ask(this.area,key,text,{...this.prefs,history:parsed.btw?[]:history.slice(1-this.prefs.limit)});
+      const response=await this.ask(this.area,key,text,{...this.prefs,history:parsed.btw||this.area==='speaking'?[]:history.slice(1-this.prefs.limit)});
       if(this.disposed)return;
       if(parsed.btw){
         this.side.set(thread,{question:parsed.question,answer:response});

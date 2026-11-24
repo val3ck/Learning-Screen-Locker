@@ -85,7 +85,7 @@ export class EnglishScreen {
         if(type==='dialogue-transcribe'){
           if(this.state.attempt?.id!==result.attemptId||this.root.querySelector<HTMLTextAreaElement>('#en-live-reply')?.dataset.enAnswer!==result.key)throw Error('The Speaking turn changed.');
           await this.send({type:'answer',key:result.key,value:result.text,flag:true});
-          this.message('Transcript added. Read and edit it before sending.');
+          this.message(result.truncated?'Transcript was shortened to fit. Review the visible text before sending.':'Transcript added. Read and edit it before sending.');
         }else{
           this.state=result.view;this.onUpdate(this.state);this.render();
           this.root.querySelector<HTMLTextAreaElement>('#en-live-reply')?.focus({preventScroll:true});
@@ -138,7 +138,7 @@ export class EnglishScreen {
     if(type==='speak-word'){const index=Number(button.dataset.index);await this.speak({kind:'word',index},[this.state.lesson.vocabulary[index].en]);return;}
     if(type==='speak-catch-word'){const index=Number(button.dataset.index),word=this.state.lesson.listening.catchWords?.[index]?.word;if(word)await this.speak({kind:'catch-word',index},[word]);return;}
     if(type==='speak-model'){await this.speak({kind:'model'},[this.state.lesson.speaking.model]);return;}
-    if(type==='advance'||type==='previous'||type==='complete-lesson'||type==='audio-unavailable'){await this.stopRecording();this.stopSpeech();}
+    if(type==='advance'||type==='previous'||type==='complete-lesson'||type==='audio-unavailable'||type==='finish-speaking'){await this.stopRecording();this.stopSpeech();}
     await this.send({type,key:button.dataset.key,area:button.dataset.area});if(type==='check'&&/^(grammar|listening)-/.test(button.dataset.key||'')&&this.state.canAdvance){const area=button.dataset.key!.split('-')[0];if(!(this.state.attempt as any)?.blockSummaries?.[area]){const trigger=this.root.querySelector<HTMLButtonElement>('[data-en-action=ai-conclusion]');if(trigger)await this.dispatch('ai-conclusion',trigger);}}if(['advance','previous','complete-lesson','skip-break','practice-next'].includes(type))window.scrollTo({top:0,behavior:'smooth'});
   }
   clock(activeMs:number,active:boolean,breakRemainingMs?:number){const now=Date.now(),delta=Math.min(1500,now-this.lastClock);this.lastClock=now;const run=this.state.run;const timed=this.root.querySelector('#en-timed-break-clock');if(timed&&run?.payload.pauseUntil!==undefined)timed.textContent=duration(Math.ceil(Math.max(0,run.payload.pauseUntil-now)/1000)*1000);if(run?.payload.extraPractice||run?.payload.revisit)run.activeMs=activeMs;else this.state.day.activeMs=activeMs;const n=this.root.querySelector('#en-clock');if(n)n.textContent=`${duration(activeMs)} / ${run?.payload.extraPractice||run?.payload.revisit?'30:00':duration(this.state.targetMs)}`;const surrender=this.root.querySelector<HTMLButtonElement>('#en-surrender');if(surrender)surrender.hidden=activeMs<15*60000;if(this.state.run?.payload.phase==='break'&&active){if(breakRemainingMs!==undefined)this.state.run.payload.breakRemainingMs=breakRemainingMs;const b=this.root.querySelector('#en-break-clock');if(b)b.textContent=duration(this.state.run.payload.breakRemainingMs);}}

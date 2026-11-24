@@ -2,32 +2,80 @@ import type {EnglishLesson} from './types';
 
 export const LUNA_CONTEXT_LIMIT = 5;
 export const LUNA_INPUT_LIMIT = 1200;
+export const SPEAKING_INPUT_LIMIT = 3600;
+export const SPEAKING_MAX_REPLIES = 4;
+export const SPEAKING_FINISH_AVAILABLE = 3;
+export const SPEAKING_HISTORY_LIMIT = 20;
+export const SPEAKING_RECAP_LIMIT = 130;
+export const SPEAKING_RECAP_KEYS = ['action','reason','verification'] as const;
 export interface LunaMessage { role: 'user' | 'assistant'; text: string }
+export type SpeakingRecap = Partial<Record<typeof SPEAKING_RECAP_KEYS[number],string>>;
+export interface SpeakingCorrection {start:number;end:number;replacement:string;explanation:string}
+export interface SpeakingReview {score:number;reason:string;corrections:SpeakingCorrection[]}
+export interface SpeakingMessage extends LunaMessage {review?:SpeakingReview}
 export interface SpeakingDialogue {
   turn: number;
   clearReplies: number;
-  status: 'clarify' | 'continue' | 'ready';
-  messages: LunaMessage[];
+  status: 'clarify' | 'continue' | 'ready' | 'wrapped';
+  messages: SpeakingMessage[];
   feedback: string;
+  recap?: SpeakingRecap;
+  hint?: string;
+}
+
+function shortText(value:unknown,max:number):value is string {
+  return typeof value==='string'&&!!value.trim()&&value.length<=max;
+}
+
+function isLunaMessage(message:any):message is LunaMessage {
+  return !!message&&['user','assistant'].includes(message.role)&&shortText(message.text,LUNA_INPUT_LIMIT);
 }
 
 export function isLunaContext(value: unknown): value is LunaMessage[] {
-  return Array.isArray(value) && value.length <= LUNA_CONTEXT_LIMIT && value.every(message =>
-    message && ['user', 'assistant'].includes(message.role) && typeof message.text === 'string' &&
-    message.text.trim().length > 0 && message.text.length <= LUNA_INPUT_LIMIT);
+  return Array.isArray(value)&&value.length<=LUNA_CONTEXT_LIMIT&&value.every(isLunaMessage);
+}
+
+function validReview(review:SpeakingReview,text:string){
+  return !!review&&Number.isInteger(review.score)&&review.score>=0&&review.score<=100&&shortText(review.reason,320)&&
+    Array.isArray(review.corrections)&&review.corrections.length<=3&&review.corrections.every((fix,index,all)=>
+      !!fix&&Number.isInteger(fix.start)&&Number.isInteger(fix.end)&&fix.start>=(all[index-1]?.end??0)&&fix.end>fix.start&&
+      fix.end<=text.length&&typeof fix.replacement==='string'&&fix.replacement.length<=64&&shortText(fix.explanation,280));
 }
 
 export function isSpeakingDialogue(value: unknown): value is SpeakingDialogue {
   const d = value as SpeakingDialogue;
   return !!d && Number.isSafeInteger(d.turn) && d.turn > 0 && Number.isSafeInteger(d.clearReplies) &&
-    d.clearReplies >= 0 && d.clearReplies <= d.turn && ['clarify', 'continue', 'ready'].includes(d.status) &&
-    (d.status !== 'ready' || d.clearReplies >= 2) && isLunaContext(d.messages) &&
-    d.messages.at(-1)?.role === 'assistant' && typeof d.feedback === 'string' && d.feedback.length <= 280;
+    d.clearReplies >= 0 && d.clearReplies <= d.turn && ['clarify', 'continue', 'ready','wrapped'].includes(d.status) &&
+    (d.status !== 'ready' || d.clearReplies >= 2) && (d.status!=='wrapped'||d.turn>=SPEAKING_FINISH_AVAILABLE) &&
+    Array.isArray(d.messages)&&d.messages.length<=SPEAKING_HISTORY_LIMIT&&
+    d.messages.every(m=>m&&['user','assistant'].includes(m.role)&&shortText(m.text,m.role==='user'?SPEAKING_INPUT_LIMIT:LUNA_INPUT_LIMIT)&&
+      (m.review===undefined||m.role==='user'&&validReview(m.review,m.text)))&&
+    d.messages.at(-1)?.role === 'assistant' && typeof d.feedback === 'string' && d.feedback.length <= 280 &&
+    (d.hint===undefined||shortText(d.hint,280))&&
+    (d.recap===undefined||!!d.recap&&typeof d.recap==='object'&&!Array.isArray(d.recap)&&
+      Object.entries(d.recap).every(([key,value])=>SPEAKING_RECAP_KEYS.some(allowed=>allowed===key)&&shortText(value,SPEAKING_RECAP_LIMIT)));
+}
+
+export function speakingDone(state?:SpeakingDialogue) {
+  return state?.status==='ready'||state?.status==='wrapped';
+}
+
+export function canWrapSpeaking(state?:SpeakingDialogue):state is SpeakingDialogue {
+  return !!state&&!speakingDone(state)&&state.turn>=SPEAKING_FINISH_AVAILABLE;
 }
 
 export function dialogueKey(state?: SpeakingDialogue) { return `live-speaking-${state?.turn ?? 0}`; }
+export function speakingQuestion(lesson:EnglishLesson,state?:SpeakingDialogue) {
+  return state?.messages.at(-1)?.text||speakingBrief(lesson).opening;
+}
 
 export function speakingBrief(lesson: EnglishLesson) {
+  if (lesson.id === 'daily-004') return {
+    opening: 'The team cannot finish every reminder request in one sprint. What would you change first, and why?',
+    goal: 'Pick one change to the appointment reminders. Say what you would count before and after the change to see if it helped.',
+    facts: 'The clinic team has two weeks to improve the appointment reminders. There are more requests than the team can finish in this sprint.',
+    phrases: ['I’d prioritize… because…', 'Within this sprint, we could…', 'To tell whether it worked, I’d compare…'],
+  };
   if (lesson.id === 'daily-030') return {
     opening: 'We added an index on patient_email, but the search still takes two seconds. What would you check first?',
     goal: 'Explain what you would look for in the query plan and how you would verify an improvement.',
