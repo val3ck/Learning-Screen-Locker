@@ -43,7 +43,13 @@ export class EnglishScreen {
     for(const button of this.root.querySelectorAll<HTMLButtonElement>('[data-en-action]'))button.addEventListener('click',()=>{if(this.aiPending&&button.dataset.enAction?.startsWith('ai-'))return;if(this.aiPending&&button.dataset.enAction==='surrender'){void this.dispatch('surrender',button).catch(e=>this.message(String(e)));return;}if(button.dataset.enAction==='stop-speech'){this.stopSpeech();return;}void this.run(()=>this.dispatch(button.dataset.enAction!,button));});
   }
   private async flush(){if(this.timer)clearTimeout(this.timer);this.timer=null;const entries=[...this.pending];this.pending.clear();for(const [key,value]of entries){const next=await window.recall.englishAction({type:'answer',key,value});this.state=next;this.onUpdate(next);} }
-  private run(work:()=>Promise<void>){this.queue=this.queue.then(work).catch(error=>this.message(String(error).replace(/^Error: /,'')));return this.queue;}
+  private run(work:()=>Promise<void>){
+    this.queue=this.queue.then(work).catch(error=>{
+      const message=error instanceof Error?error.message:String(error);
+      this.message(message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/,''));
+    });
+    return this.queue;
+  }
   private askLuna(area:string,key:string,question:string,luna:LunaOptions):Promise<string>{
     const work=this.queue.then(async()=>{
       await this.flush();
@@ -159,7 +165,7 @@ export class EnglishScreen {
     this.stopSpeech();const mime=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4'].find(m=>MediaRecorder.isTypeSupported(m));const recorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined),chunks:Blob[]=[];
     this.recorder=recorder;this.recordingKey=key;this.recordingDone=new Promise(resolve=>{this.stopRecordingResolve=resolve;});
     recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
-    recorder.onstop=()=>{void (async()=>{let notice="Recording saved locally. Add a typed transcript to check its wording.";try{const blob=new Blob(chunks,{type:recorder.mimeType||mime||'audio/webm'}),id=attempt.id+':'+key;const old=this.audioUrls.get(id);if(old)URL.revokeObjectURL(old);this.audioUrls.set(id,URL.createObjectURL(blob));await window.recall.englishSaveAudio(id,Array.from(new Uint8Array(await blob.arrayBuffer())),blob.type);if(this.state.attempt?.id===attempt.id&&!this.state.attempt.answers[key]){this.state=await window.recall.englishAction({type:'answer',key,value:'[Local audio recording — add a typed transcript to check wording]',flag:true});this.onUpdate(this.state);}}catch(error){notice='The recording could not be saved: '+String(error);}finally{stream.getTracks().forEach(t=>t.stop());this.recorder=null;this.recordingKey='';this.stopHeartbeat();this.stopRecordingResolve?.();this.stopRecordingResolve=null;this.render();this.message(notice);}})();};
+    recorder.onstop=()=>{void (async()=>{let notice=key.startsWith("live-speaking-")?"Recording saved locally. Select “Transcribe recording” to review it.":"Recording saved locally. Add a typed transcript to check its wording.";try{const blob=new Blob(chunks,{type:recorder.mimeType||mime||'audio/webm'}),id=attempt.id+':'+key;await window.recall.englishSaveAudio(id,Array.from(new Uint8Array(await blob.arrayBuffer())),blob.type);const old=this.audioUrls.get(id);if(old)URL.revokeObjectURL(old);this.audioUrls.set(id,URL.createObjectURL(blob));if(this.state.attempt?.id===attempt.id&&!this.state.attempt.answers[key]){this.state=await window.recall.englishAction({type:'answer',key,value:'[Local audio recording — add a typed transcript to check wording]',flag:true});this.onUpdate(this.state);}}catch(error){notice='The recording could not be saved: '+String(error);}finally{stream.getTracks().forEach(t=>t.stop());this.recorder=null;this.recordingKey='';this.stopHeartbeat();this.stopRecordingResolve?.();this.stopRecordingResolve=null;this.render();this.message(notice);}})();};
     recorder.onerror=()=>{void this.stopRecording();this.message('Recording stopped. You can type your reply.');};recorder.start(250);this.recordingTimeout=setTimeout(()=>void this.stopRecording(),180000);this.heartbeat('recording');this.render();
   }
   private async stopRecording(){if(this.recordingTimeout)clearTimeout(this.recordingTimeout);this.recordingTimeout=null;if(this.recorder&&this.recorder.state!=='inactive')this.recorder.stop();if(this.recordingDone){await this.recordingDone;this.recordingDone=null;}}

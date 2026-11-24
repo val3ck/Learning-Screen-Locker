@@ -23,7 +23,11 @@ class EnglishRepository{
   write(value,expectedRevision,owner){return this.locked(()=>{if(this.readonly(owner))throw new Conflict();const previous=this.read();if(previous.revision!==expectedRevision)throw new Conflict('Є новіший прогрес. Чернетку збережено окремо; онови стан.');const next=this.validate?this.validate(value):structuredClone(value);next.revision=previous.revision+1;this.atomic(this.file,next);return next;});}
   backup(value,label='import'){fs.mkdirSync(path.join(this.root,'backups'),{recursive:true});const file=path.join(this.root,'backups',`${label}-${this.now()}-${crypto.randomBytes(3).toString('hex')}.json`);fs.writeFileSync(file,JSON.stringify(value,null,2));return file;}
   repair(value){return this.locked(()=>{if(this.readonly('desktop'))throw new Conflict();for(const suffix of ['', '.bak'])if(fs.existsSync(this.file+suffix)){fs.mkdirSync(path.join(this.root,'backups'),{recursive:true});fs.copyFileSync(this.file+suffix,path.join(this.root,'backups',`damaged-${this.now()}${suffix}.json`));}const next=this.validate(value);next.revision=1;this.damaged=true;this.atomic(this.file,next);return next;});}
-  audioPath(key){if(typeof key!=='string'||!/^[\w-]{1,150}:(?:monologue|retry|turn-[0-3])$/.test(key))throw new Conflict('Некоректний ідентифікатор аудіо.',400);return path.join(this.root,'audio',crypto.createHash('sha256').update(key).digest('hex'));}
+  audioPath(key){
+    if(typeof key!=='string'||key.trim()!==key||!/^[\w-]{1,150}:(?:monologue|retry|turn-[0-3]|live-speaking-(?:0|[1-9]\d{0,15}))$/.test(key))
+      throw new Conflict('Некоректний ідентифікатор аудіо.',400);
+    return path.join(this.root,'audio',crypto.createHash('sha256').update(key).digest('hex'));
+  }
   saveAudio(key,bytes,mime,owner){if(this.readonly(owner))throw new Conflict();if(!Buffer.isBuffer(bytes))bytes=Buffer.from(bytes);if(!bytes.length||bytes.length>10000000||!/^audio\/(?:webm|ogg|mp4|wav)(?:;[\w=.-]+)*$/.test(mime))throw new Conflict('Некоректний або надто великий аудіозапис.',400);const file=this.audioPath(key);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file+'.tmp',bytes);fs.renameSync(file+'.tmp',file+'.audio');this.atomic(file+'.json',{key,mime});return path.basename(file);}
   loadAudio(key){const file=this.audioPath(key);try{const meta=JSON.parse(fs.readFileSync(file+'.json','utf8'));return {base64:fs.readFileSync(file+'.audio').toString('base64'),mime:meta.mime};}catch{return null;}}
 }

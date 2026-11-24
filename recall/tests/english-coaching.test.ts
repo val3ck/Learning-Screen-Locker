@@ -204,6 +204,23 @@ test('Grammar checks the whole sentence and grounds severity and highlights in t
  ]);
 });
 
+test('Grammar check highlights a missing article even when the provider misses it',async()=>{
+ const ai=new AI.EnglishAI({statisticsPath:temp(),env:{}});
+ ai.save({provider:'groq',key:'mock-key'});
+ ai.save({translationGroqFreeConfirmed:true});
+ const service=new Translation.EnglishTranslation({root:ai.root,ai});
+ ai.remote=async()=>({choices:[{message:{content:JSON.stringify({explanation:'No grammatical issues found.',issues:[]})}}]});
+ const context='The component is an easy version of prepared algorithm that everyone knows.';
+ const result=await service.handle({action:'grammar',text:'component',context});
+ assert.equal(result.explanation,'Check the highlighted noun phrase.');
+ assert.equal(result.issues.length,1);
+ const [issue]=result.issues;
+ assert.equal(context.slice(issue.start,issue.end),'prepared algorithm');
+ assert.match(issue.reason,/a prepared algorithm/);
+ const correct=context.replace('of prepared','of a prepared');
+ assert.deepEqual((await service.handle({action:'grammar',text:'component',context:correct})).issues,[]);
+});
+
 test('English lesson blocks keep course instructions in English for all 84 lessons and localise saved task text',()=>{
  const cyrillic=/\p{Script=Cyrillic}/u;
  for(const lesson of (Course as any).lessons){

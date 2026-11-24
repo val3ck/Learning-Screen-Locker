@@ -3,6 +3,26 @@ const fixture=()=>new AI.EnglishAI({statisticsPath:fs.mkdtempSync(path.join(os.t
 const bundle=()=>P.context((C as any).lessons[0],'writing',[{key:'writing',task:'Explain your own view about project introductions, with a reason.',text:'I prefer to introduce the users first because their needs shape the project.'}]);
 const reply=(b:any,off=false)=>({answers:b.answers.map((a:any)=>({key:a.key,relevance:off?'off_task':'on_task',scores:{task:off?0:3,grammar:3,vocabulary:3,clarity:3,coherence:3},summary:'Your reasoning is clear for this task.',strengths:['A reason is given.'],conclusion:{skill:'maintain',focus:'Закріпи зрозумілу відповідь.',rule:'Збережи головну думку та додай причину за потреби.',example:'This tool helps our team.',practice:'Name one helpful tool.',solution:'Any relevant tool is acceptable.'},corrections:[],nextStep:'Explain one limitation.'}))});
 
+test('Sentence feedback preserves wording, separates task requirements and accepts contractions',()=>{
+ const b=bundle();
+ const sentence='The component is basically an easy version of prepared algorithm that everybody understands easily and knows.';
+ b.answers[0].text=sentence+" It doesn't manage the whole project. The test results improves.";
+ const raw=reply(b);
+ const row=raw.answers[0];
+ row.taskFeedback='The task asks for one sentence.';
+ row.corrections=[
+  {original:sentence,replacement:'The component is basically a simple version of a prepared algorithm that everybody understands easily.',explanation:'A rewrite.',kind:'error'},
+  {original:"doesn't manage",replacement:'does not manage',explanation:'Expand the contraction.',kind:'error'},
+  {original:'The test results improves.',replacement:'The test results improve.',explanation:'Use the base verb with a plural subject.',kind:'error'},
+ ];
+ const checked=P.validateGrade(raw,b).answers[0];
+ assert.equal(checked.taskFeedback,'The task asks for one sentence.');
+ assert.deepEqual(checked.corrections.map((c:any)=>[c.original,c.replacement]),[
+  ['prepared algorithm','a prepared algorithm'],['improves.','improve.'],
+ ]);
+ assert.match(P.gradePrompt(b).system,/Accept them for the target construction/);
+});
+
 test('A 413 causes smaller grading requests and a later failure preserves already checked answers',async()=>{
  const ai=fixture();ai.save({provider:'groq',key:'mock'});
  const base=bundle();base.answers=Array.from({length:4},(_,i)=>({

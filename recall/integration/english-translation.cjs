@@ -1,5 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const {localArticleIssues}=require('./english-correction-policy.cjs');
 // Meanings are ranked by the local sentence, not by an unrelated dictionary sense.
 const LOCAL={
  feature:[['функція; можливість','У програмі або продукті','app|software|product|add|release|implement'],['особливість','Коли описують властивість'],['риса','Для зовнішності або характерної ознаки']],
@@ -97,7 +98,15 @@ function validateHelp(action,raw,text,context){
    result.suggestions.push({word:item.word.trim(),meaning:item.meaning.trim(),usage:item.usage.trim()});
   }
  }
- if(action==='grammar')result.issues=grammarIssues(raw.issues,context);
+ if(action==='grammar'){
+  const known=localArticleIssues(context).map(({start,end,explanation,replacement})=>({
+   start,end,severity:'error',reason:explanation+' Use “'+replacement+'”.'
+  }));
+  const modelIssues=grammarIssues(raw.issues,context);
+  result.issues=[...known,...modelIssues.filter(issue=>!known.some(local=>local.start<issue.end&&issue.start<local.end))]
+   .sort((a,b)=>a.start-b.start).slice(0,8);
+  if(known.length&&!modelIssues.length)result.explanation='Check the highlighted noun phrase.';
+ }
  return result;
 }
 const allowed=c=>({

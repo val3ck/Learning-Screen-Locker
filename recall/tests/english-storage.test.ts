@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import Repository from '../integration/english-repository.cjs';
 import {newEnglishDocument,validateEnglishDocument} from '../src/modules/english/controller';
 import {EnglishHost} from '../electron/english-host';
+import {dialogueKey} from '../src/modules/english/dialogue';
 test('English repository: один власник, ревізії, резервна копія й локальне аудіо',async()=>{
   const temp=await mkdtemp(path.join(tmpdir(),'recall-english-кирилиця-'));
   try{const a=new Repository.EnglishRepository(temp,{validate:validateEnglishDocument,createDefault:newEnglishDocument}),b=new Repository.EnglishRepository(temp,{validate:validateEnglishDocument,createDefault:newEnglishDocument});
@@ -13,6 +14,27 @@ test('English repository: один власник, ревізії, резерв�
     a.saveAudio('12345-abc:monologue',Buffer.from([1,2,3]),'audio/webm','desktop');assert.equal(a.loadAudio('12345-abc:monologue').base64,'AQID');assert.throws(()=>a.audioPath('../../secret'));
     a.release('desktop');b.acquire('browser-123456');const second=b.write(saved,1,'browser-123456');assert.equal(second.revision,2);b.release('browser-123456');
     await writeFile(path.join(temp,'state.json'),'{bad');assert.equal(a.read().revision,1);const recovered=a.write(a.read(),1,'desktop');assert.equal(recovered.revision,2);assert.equal(JSON.parse(await readFile(path.join(temp,'state.json.bak'),'utf8')).revision,1);
+  }finally{await rm(temp,{recursive:true,force:true});}
+});
+test('Live Speaking audio persists by turn and is available for transcription after reopening',async()=>{
+  const temp=await mkdtemp(path.join(tmpdir(),'recall-live-speaking-'));
+  try {
+    const host=new EnglishHost(temp);
+    host.start();
+    const attempt=host.controller.document.course.activeSession!;
+    const first=dialogueKey();
+    const later=dialogueKey({turn:12,clearReplies:1,status:'clarify',messages:[{role:'assistant',text:'What would you check next?'}],feedback:''});
+    host.saveAudio(attempt.id+':'+first,[1,2,3],'audio/webm;codecs=opus');
+    host.saveAudio(attempt.id+':'+later,[4,5,6],'audio/ogg;codecs=opus');
+    assert.deepEqual(attempt.recordingNeedsTranscript,{[first]:true,[later]:true});
+    host.pause();
+
+    const restarted=new EnglishHost(temp);
+    assert.deepEqual(restarted.loadAudio(attempt.id+':'+first),{bytes:[1,2,3],mime:'audio/webm;codecs=opus'});
+    assert.deepEqual(restarted.loadAudio(attempt.id+':'+later),{bytes:[4,5,6],mime:'audio/ogg;codecs=opus'});
+    assert.equal(restarted.loadAudio(attempt.id+':live-speaking-1'),null);
+    assert.throws(()=>restarted.loadAudio(attempt.id+':live-speaking-../'),/ідентифікатор/);
+    assert.throws(()=>restarted.loadAudio(attempt.id+':live-speaking-01'),/ідентифікатор/);
   }finally{await rm(temp,{recursive:true,force:true});}
 });
 test('English host: пошкоджене збереження не блокує SQL і відновлюється лише явним імпортом',async()=>{

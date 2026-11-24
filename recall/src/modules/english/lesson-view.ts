@@ -1,5 +1,5 @@
 import {completedPromptBox} from './conclusion-view';
-import {renderAIPractice,renderAIBlock} from './ai-view';
+import {renderAIPractice,renderAIBlock,renderFeedbackCorrections,renderTaskFeedback} from './ai-view';
 import {savedDialogue} from './live-speaking-view';
 export {renderAISettings} from './ai-view';
 import type {EnglishView,EnglishChoice,EnglishLanguageReport} from './types';
@@ -72,7 +72,7 @@ function savedWork(v:EnglishView,reports:Map<string,EnglishLanguageReport>,selec
       const value=work.answers[key]||'',grade=graded.get(key),report=reports.get(work.id+':'+key)||work.checks[key];
       const edited=!!grade?.checked&&grade.checked!==value;
       const feedback=grade?`<p class="en-answer-status ${needsReview(key)?'needs-work':'passed'}">${grade.row.score}/100 · ${needsReview(key)?'Needs review':grade.row.passed?'Passed':'Checked'}${edited?' · earlier draft':''}</p>
-        <p>${e(grade.row.summary)}</p>${(grade.row.corrections||[]).map((c:any)=>`<p><del>${e(c.original)}</del> → <ins>${e(c.replacement)}</ins><br>${e(c.explanation)}</p>`).join('')}
+        <p>${e(grade.row.summary)}</p>${renderTaskFeedback(grade.row)}${renderFeedbackCorrections(grade.row,grade.checked||'')}
         ${grade.row.nextStep?`<p><strong>Next step:</strong> ${e(grade.row.nextStep)}</p>`:''}`:'<p class="muted">No AI score recorded.</p>';
       return `<details class="en-saved-answer" ${needsReview(key)?'open':''}>
         <summary>${e(WORK_LABELS[key]||key.replace('-', ' '))}${needsReview(key)?' · Needs review':''}</summary>
