@@ -44,19 +44,32 @@ export function recordAttempt(session:SessionRecord,result:ExecutionResult,check
   session.attempts.push(attempt);
   if(check&&result.status==='correct')session.solved[i]=true;
 }
+export const SQL_DIFFICULTY_CHECKS=2;
+
+export function taskCheckEvidence(session:SessionRecord,index:number){
+  const taskId=session.tasks[index].id;
+  const checks=session.attempts.filter(attempt=>attempt.taskId===taskId&&attempt.check&&!attempt.technical);
+  return {
+    checked:checks.length>0,
+    failures:checks.filter(attempt=>attempt.status==='incorrect'||attempt.status==='error').length,
+    helped:session.hintLevels[index]>0||checks.some(attempt=>attempt.hints>0),
+  };
+}
+
 export function updateHistory(state:ModuleState,session:SessionRecord):ModuleState {
   if(session.mode==='demo')return state;
   const history=structuredClone(state.history);const at=session.endedAt||new Date().toISOString();
   const outcomes=new Map<string,number>();
   const acquired=new Set(learnedTopics(session));
+  const sql=session.moduleId==='postgresql';
   session.tasks.forEach((task:Task,i:number)=>{
     if(session.outcome==='technical'||session.outcome==='interrupted'){
       if(!session.solved[i])return;
     }
-    const attempts=session.attempts.filter(a=>a.taskId===task.id&&a.check&&!a.technical);
-    const clean=session.solved[i]&&session.hintLevels[i]===0&&!attempts.some(a=>a.status!=='correct'||a.hints>0);
-    const touched=attempts.length>0||session.hintLevels[i]>0||session.taskElapsedMs[i]>=5000&&i<=session.currentIndex;
-    const grade=clean?2:session.solved[i]?1:touched?0:-1;
+    const evidence=taskCheckEvidence(session,i);
+    const struggled=evidence.helped||evidence.failures>=(sql?SQL_DIFFICULTY_CHECKS:1);
+    const unresolved=sql?struggled:evidence.checked||evidence.helped||session.taskElapsedMs[i]>=5000&&i<=session.currentIndex;
+    const grade=session.solved[i]?(struggled?1:2):unresolved?0:-1;
     // A later, unfinished combined task must not erase a skill already demonstrated.
     for(const topicId of task.topicIds){
       if(task.learning?.topicId===topicId&&!acquired.has(topicId))continue;
@@ -68,7 +81,7 @@ export function updateHistory(state:ModuleState,session:SessionRecord):ModuleSta
     const old=history[topicId]||{topicId,intervalIndex:-1,dueAt:at,lastReviewedAt:'',independent:0,assisted:0,missed:0};
     const clean=grade===2,passed=grade>=1;
     const index=clean?Math.min(old.intervalIndex+1,INTERVALS.length-1):0;
-    history[topicId]={...old,intervalIndex:index,dueAt:daysAfter(at,INTERVALS[index]),lastReviewedAt:grade>=0?at:old.lastReviewedAt,independent:old.independent+Number(clean),assisted:old.assisted+Number(passed&&!clean),missed:old.missed+Number(!passed)};
+    history[topicId]={...old,intervalIndex:index,dueAt:daysAfter(at,INTERVALS[index]),lastReviewedAt:grade>=0?at:old.lastReviewedAt,independent:old.independent+Number(clean),assisted:old.assisted+Number(passed&&!clean),missed:old.missed+Number(sql?grade===0:!passed)};
   }
   const learned=[...new Set([...(state.learnedTopicIds||[]),...learnedTopics(session)])];
   return {...state,history,...(learned.length?{learnedTopicIds:learned}:{})};

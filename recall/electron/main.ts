@@ -9,6 +9,7 @@ import {pathToFileURL} from 'node:url';
 import {Store,validSession} from './store';
 import {SQLAI} from './sql-ai';
 import {SQLChat} from './sql-chat';
+import {withoutAIRecipe} from '../src/modules/postgresql/ai-task-text';
 import type {Bootstrap,ModuleState,ScheduleState,SessionRecord,Settings} from '../src/core/contracts';
 import {getModule} from '../src/modules/registry';
 import {tickSchedule,snoozeSchedule,WARNING_MS,automaticDayAllowed,hasFinishedToday,completeScheduleForDay} from '../src/core/scheduler';
@@ -579,7 +580,7 @@ if(launchLock)void app.whenReady().then(async()=>{
   if(!demo&&!smoke)await migrateLegacyStatistics(store,legacyStatisticsRoots(projectRoot,app.isPackaged,runtime.statisticsPath));
   const coursePath=await resolveCoursePath(projectRoot,app.isPackaged,runtime.coursePath);
   const aiEnv=demo||smoke?{}:readRecallAiEnv(projectRoot,app.isPackaged);
-  sessions=await store.sessions();
+  sessions=(await store.sessions()).map(session=>({...session,tasks:session.tasks.map(withoutAIRecipe)}));
   settings=await store.settings(coursePath);settings.statisticsPath=store.root;settings.coursePath=coursePath;settings.englishCoursePath=await resolveEnglishPath(projectRoot,app.isPackaged,settings.englishCoursePath);
   const checkerRoot=path.join(app.isPackaged?process.resourcesPath:path.join(projectRoot,'resources'),'english-checker');englishAI=new AI.EnglishAI({statisticsPath:store.root,legacyConfigPath:demo||smoke?undefined:path.join(settings.englishCoursePath!,'.english-daily-private.json'),env:aiEnv});translator=new Translation.EnglishTranslation({root:store.root,ai:englishAI,glossary:Translation.courseGlossary(EnglishCourse.lessons)});languageChecker=new Language.OfflineEnglishChecker({root:checkerRoot,workerFile:app.isPackaged?path.join(checkerRoot,'service-worker.cjs'):path.join(projectRoot,'integration','english-language.cjs'),nodePath:process.execPath});
   englishHost=new EnglishHost(store.root,undefined,()=>trackDuration('english',settings.durationMinutes),()=>englishPauseMinutes(settings.englishPauseMinutes));englishHost.recover();englishSpeech=new EnglishSpeech(path.join(store.root,'modules','english','speech-cache'));englishSchedule=await store.read('schedules/english.json',eveningSchedule(new Date()),(v:any)=>v?.version===1&&/^\d{4}-\d{2}-\d{2}$/.test(v.dayKey)&&typeof v.finished==='boolean'&&typeof v.offered==='boolean'&&Number.isFinite(v.lastTick)&&Number.isFinite(v.warningRemainingMs)&&v.warningRemainingMs>=0&&v.warningRemainingMs<=WARNING_MS&&(v.snoozedUntil===undefined||Number.isFinite(v.snoozedUntil)));installEnglish();

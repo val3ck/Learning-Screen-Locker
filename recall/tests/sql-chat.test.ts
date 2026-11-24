@@ -58,6 +58,23 @@ test('Every submitted hint counts, with legacy assisted attempts still recognize
   assert.equal(isStaleSessionUpdate(session,legacy),true);
 });
 
+test('One SQL slip keeps an independent pass; two checked failures indicate difficulty',()=>{
+  const session=createSession();
+  const state={version:1 as const,moduleId:'postgresql',progress:null,history:{}};
+  recordAttempt(session,{status:'error',message:'An error while running the draft'},false);
+  recordAttempt(session,{status:'error',technical:true,message:'Technical error'},true);
+  recordAttempt(session,{status:'incorrect',message:'Misread the column'},true);
+  assert.equal(updateHistory(state,session).history.select.missed,0);
+
+  const repeated=structuredClone(session);
+  recordAttempt(repeated,{status:'incorrect',message:'Still wrong'},true);
+  assert.equal(updateHistory(state,repeated).history.select.missed,1);
+  recordAttempt(session,{status:'correct',message:'Corrected independently'},true);
+  recordAttempt(repeated,{status:'correct',message:'Corrected after repeated checks'},true);
+  assert.equal(updateHistory(state,session).history.select.independent,1);
+  assert.equal(updateHistory(state,repeated).history.select.assisted,1);
+});
+
 test('All providers honor the compact chat output limit',async()=>{
   const keys={openai:'fake',groq:'fake',gemini:'fake',openrouter:'fake'};
   const models={openai:'gpt-6-luna',groq:'fake',gemini:'fake',openrouter:'fake'};

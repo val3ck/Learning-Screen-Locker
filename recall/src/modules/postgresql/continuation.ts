@@ -1,4 +1,5 @@
 import type {GenerationContext,LessonPreview,SessionRecord,Task} from '../../core/contracts';
+import {SQL_DIFFICULTY_CHECKS,taskCheckEvidence} from '../../core/session';
 import {catalog} from './catalog';
 import {makeTask,VARIANTS_PER_TOPIC} from './templates';
 import {random} from './fixtures';
@@ -7,7 +8,9 @@ import {formatSQL} from './solution-review';
 import type {SQLPayload} from './types';
 
 export function extraTask(context:GenerationContext,session:SessionRecord):Task {
-  const weak=session.hintLevels.some(n=>n>0)||session.attempts.some(a=>a.check&&!a.technical&&a.status!=='correct');
+  const evidence=session.tasks.map((task,index)=>({topicId:task.topicIds[0],...taskCheckEvidence(session,index)}));
+  const needsReview=evidence.filter(item=>item.helped||item.failures>=SQL_DIFFICULTY_CHECKS);
+  const weak=needsReview.length>0;
   if(context.allowNewTopic&&!weak&&!session.tasks.some(t=>t.learning)){
     const preview=nextLesson(context.confirmedTopicIds);
     if(preview){const index=catalog.findIndex(t=>t.id===preview.topicId),task=makeTask(index,0,context.seed,1);task.learning={topicId:preview.topicId,title:preview.title,explanation:preview.explanation};task.selectionReason='Наступне поняття для практики. Після правильної перевірки ця тема з’являтиметься в наступних повтореннях Recall.';return task;}
@@ -17,13 +20,15 @@ export function extraTask(context:GenerationContext,session:SessionRecord):Task 
   if(!candidates.length)throw new Error('Немає підтверджених тем для додаткової вправи.');
   const weakness=(topicId:string)=>{
     const h=context.history[topicId];
-    const current=session.tasks.filter(t=>t.topicIds[0]===topicId);
-    const failed=session.attempts.filter(a=>!a.technical&&(a.status==='incorrect'||a.status==='error')&&current.some(t=>t.id===a.taskId)).length;
-    const helped=current.filter(t=>session.hintLevels[session.tasks.indexOf(t)]>0).length;
-    return failed*4+helped*2+(h?(h.missed*2+h.assisted)/(h.independent+h.assisted+h.missed+1):0);
+    const current=needsReview.filter(item=>item.topicId===topicId);
+    const currentWeight=current.reduce((sum,item)=>sum+
+      (item.failures>=SQL_DIFFICULTY_CHECKS?item.failures*4:0)+Number(item.helped)*2,0);
+    return currentWeight+(h?(h.missed*2+h.assisted)/(h.independent+h.assisted+h.missed+1):0);
   };
-  const unused=candidates.filter(t=>!session.tasks.some(old=>old.templateId.split(':').slice(0,2).join(':')===t.templateId));
-  const pool=distinctPractice(unused.length?unused:candidates,session.tasks);
+  const targeted=candidates.filter(task=>needsReview.some(item=>item.topicId===task.topicIds[0]));
+  const eligible=targeted.length?targeted:candidates;
+  const unused=eligible.filter(t=>!session.tasks.some(old=>old.templateId.split(':').slice(0,2).join(':')===t.templateId));
+  const pool=distinctPractice(unused.length?unused:eligible,session.tasks);
   pool.sort((a,b)=>weakness(b.topicIds[0])-weakness(a.topicIds[0])||Number(session.tasks.some(t=>t.topicIds[0]===a.topicIds[0]))-Number(session.tasks.some(t=>t.topicIds[0]===b.topicIds[0]))||catalog.findIndex(t=>t.id===b.topicIds[0])-catalog.findIndex(t=>t.id===a.topicIds[0]));
   const task=pool[0];
   task.selectionReason=weakness(task.topicIds[0])>0?'Повернемося до теми, де знадобилася допомога або були помилки.':'Є ще трохи часу — закріпимо іншу вже вивчену навичку.';
