@@ -3,7 +3,7 @@ import * as CoachingLearning from './vendor/learning';
 import * as EngineModule from './vendor/engine';
 import * as Course from './vendor/course';
 import * as Learning from './vendor/learning';
-import {practiceTask,practiceMessage} from './practice';
+import {PRACTICE_VERSION,practiceTask,practiceMessage} from './practice';
 import {canWrapSpeaking,isSpeakingDialogue,speakingDone,type SpeakingDialogue} from './dialogue';
 import {kyivDayKey} from '../../core/calendar';
 import {envelopeValid,type LearningAction,type LearningController,type LearningEnvelope,type LearningOutcome,type ActivityState} from '../../core/learning';
@@ -176,6 +176,7 @@ export class EnglishController implements LearningController {
     run.status='active';
     delete run.payload.pauseUntil;
     if(run.payload.phase==='lesson')this.engine.pause(false);
+    else if(run.payload.phase==='reinforcement')this.ensurePractice();
     this.changed();
     return true;
   }
@@ -322,14 +323,23 @@ export class EnglishController implements LearningController {
     this.closeRun(run,outcome);this.changed();
   }
   private ensurePractice(){
-    const run=this.snapshot();if(!run||run.endedAt||run.payload.practice?.presentationVersion===2)return;
+    const run=this.snapshot();if(!run||run.endedAt)return;
+    const current=run.payload.practice;
+    if(current&&(current.presentationVersion===PRACTICE_VERSION||current.presentationVersion===2&&(current.value||current.attempts||current.revealed)))return;
     const record=[...this.document.course.sessions].reverse().find(s=>s.lessonId===run.payload.lessonId);
     const lesson=(Learning as any).englishLesson(record?.lesson||Course.getLesson(run.payload.lessonId)||Course.lessons[0]) as EnglishLesson;
     // Keep the previous run's open response in the persisted history when migrating it.
     if(run.payload.practice?.value)run.payload.practiceHistory=[...(run.payload.practiceHistory||[]),clone(run.payload.practice)].slice(-100);
-    run.payload.practice=practiceTask(lesson,record,this.document.course,run.payload.practiceIndex,run.payload.practiceHistory||[]);
+    const history=this.document.runs.filter(r=>r.dayKey===run.dayKey&&r.payload.lessonId===run.payload.lessonId)
+      .flatMap(r=>[...(r.payload.practiceHistory||[]),...(r!==run&&r.payload.practice?[r.payload.practice]:[])]);
+    run.payload.practice=practiceTask(lesson,record,this.document.course,run.payload.practiceIndex,history);
+    if(!run.payload.practice)this.closeRun(run,'completed');
   }
-  private practiceAction(action:LearningAction){this.ensurePractice();const run=this.snapshot()!,p=run.payload.practice!;
+  private practiceAction(action:LearningAction){
+    const run=this.snapshot()!;
+    if(!run.payload.practice)this.ensurePractice();
+    const p=run.payload.practice;
+    if(!p)return;
     if(action.type==='answer'){p.value=(action.value||'').slice(0,20000);delete p.result;delete (p as any).aiAssessment;}
     else if(action.type==='hint')p.revealed=true;
     else if(action.type==='check'||action.type==='self'){

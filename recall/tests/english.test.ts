@@ -9,7 +9,7 @@ import {kyivDayKey} from '../src/core/calendar';
 import {eveningSchedule,tickEvening,snoozeEvening} from '../src/core/evening';
 import {hasFinishedToday} from '../src/core/scheduler';
 import type {SessionRecord} from '../src/core/contracts';
-import type {EnglishLesson} from '../src/modules/english/types';
+import type {EnglishLesson,EnglishPractice} from '../src/modules/english/types';
 const at=(hour=19,minute=0)=>new Date(Date.UTC(2026,10,14,hour-2,minute));
 function fixture(){let date=at();const c=new EnglishController(newEnglishDocument(date),()=>new Date(date));c.start();return {c,nextDay(){date=new Date(date.getTime()+86400000);}};}
 function answer(c:EnglishController,key:string,value:string){c.dispatch({type:'answer',key,value});}
@@ -101,3 +101,37 @@ test('English не скасовує SQL; однаковий день облік�
 test('English: імпорт активного уроку зараховує вже відпрацьований час цього дня',()=>{const {c}=fixture();credit(c,10*60000);const imported=importEnglishCourse({format:'english-daily-progress',state:c.document.course},at());assert.equal(imported.days[kyivDayKey(at())].activeMs,10*60000);assert.ok(imported.course.activeSession);});
 test('English: останні символи на межі бюджету зберігаються без додаткового часу',()=>{const {c}=fixture();credit(c,ENGLISH_TARGET_MS);answer(c,'review-0','Last input before the summary.');assert.equal(c.document.course.activeSession!.answers['review-0'],'Last input before the summary.');assert.equal(c.day().activeMs,ENGLISH_TARGET_MS);assert.equal(c.document.course.sessions.length,0);});
 test('English: старі слова не перетворюються на пройдені уроки або API-ключі',()=>{const doc=importEnglishCourse({xp:300,learnedWords:{old:{mastery:5}},apiKey:'must-not-copy'},at());assert.equal(doc.course.familiarWords.length,1);assert.equal(doc.course.sessions.length,0);assert.ok(!JSON.stringify(doc).includes('must-not-copy'));});
+
+test('English extra practice inherits daily history, preserves a legacy draft and finishes when the deck ends',()=>{
+ const {c}=fixture();completeLesson(c);
+ const complete=(controller:EnglishController)=>{
+  const p=controller.snapshot()!.payload.practice!;
+  answer(controller,'practice',p.kind==='choice'?String(p.correct):p.answer);
+  controller.dispatch({type:'check',key:'practice'});controller.dispatch({type:'practice-next'});
+ };
+ for(let i=0;i<3;i++)complete(c);
+ const daily=c.snapshot()!;
+ assert.equal(daily.status,'completed');assert.equal(daily.payload.practiceHistory?.length,3);
+ c.startExtension();
+ const extra=c.snapshot()!;
+ assert.notEqual(extra.id,daily.id);
+ extra.payload.practice!.presentationVersion=2;
+ answer(c,'practice','A draft from before the update');
+ c.pause();
+ const reopened=new EnglishController(validateEnglishDocument(c.document),()=>at());
+ reopened.startExtension();
+ assert.equal(reopened.snapshot()!.payload.practice?.value,'A draft from before the update');
+ for(let i=0;i<10&&reopened.snapshot()!.status==='active';i++)complete(reopened);
+ const finished=reopened.snapshot()!;
+ assert.equal(finished.status,'completed');
+ assert.equal(finished.payload.practice,null);
+ assert.equal(reopened.day().activeMs,c.day().activeMs);
+ assert.equal(reopened.document.course.sessions.length,1);
+ assert.equal(reopened.document.course.xp,c.document.course.xp);
+ assert.equal(reopened.canExtend(),false);
+ const context=(p:EnglishPractice)=>p.kind==='choice'?p.prompt.replace(/_{3,}/,()=>p.answer):p.answer;
+ const contexts=[...daily.payload.practiceHistory!,...finished.payload.practiceHistory!].map(context);
+ assert.equal(contexts.length,10);
+ assert.equal(new Set(contexts).size,contexts.length);
+ validateEnglishDocument(reopened.document);
+});

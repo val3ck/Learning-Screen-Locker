@@ -13,7 +13,7 @@ test('A +30 minute extension resumes the same lesson and saves a separate active
  controller.day().activeMs=ENGLISH_TARGET_MS-1000;
  controller.tick(1000,{active:true});controller.dispatch({type:'save-and-exit'});
  assert.ok(controller.view().canExtend);
- assert.match(renderEnglishScreen(controller.view(),'',new Map()),/Practise for 30 more minutes/);
+ assert.match(renderEnglishScreen(controller.view(),'',new Map()),/Practise for up to 30 more minutes/);
 
  controller.startExtension();
  const extra=controller.snapshot()!;
