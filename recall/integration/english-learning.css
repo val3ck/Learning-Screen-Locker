@@ -306,3 +306,13 @@
 .en-rule-group, .en-saved-work .en-saved-answer { border-top: 1px solid #c8d3bc; padding: 12px 0; }
 .en-saved-work summary, .en-rule-group summary { cursor: pointer; }
 .en-saved-work blockquote { overflow-wrap: anywhere; white-space: pre-wrap; }
+
+.en-answer-editor{position:relative}
+.en-answer-editor>textarea{display:block}
+.en-answer-overlay{position:absolute;box-sizing:border-box;overflow:hidden;pointer-events:none;color:transparent;white-space:pre-wrap;overflow-wrap:break-word;padding:14px 16px;font:15px/1.7 'Segoe UI',sans-serif}
+.en-answer-overlay:empty{display:none}
+.en-correction-mark{color:inherit;background:#e87b5238;text-decoration:underline wavy #a8492c;text-underline-offset:.18em}
+.en-correction-mark.is-style{background:#e8ab303b;text-decoration-color:#8b650b}
+.en-checked-draft blockquote{white-space:pre-wrap;overflow-wrap:anywhere}
+.en-checked-draft .en-correction-mark:focus{outline:2px solid #335d38;outline-offset:2px}
+.en-correction-link{display:inline-block;font-size:.85em;font-weight:600;text-underline-offset:.2em}

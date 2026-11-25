@@ -1,4 +1,21 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {EnglishController,newEnglishDocument} from '../src/modules/english/controller';import * as Course from '../src/modules/english/vendor/course';import * as L from '../src/modules/english/vendor/learning';import Language from '../integration/english-language.cjs';import {practiceTask,practiceMessage} from '../src/modules/english/practice';
+import {answerCorrections,renderCheckedText} from '../src/modules/english/correction-highlights';
+import CorrectionPolicy from '../integration/english-correction-policy.cjs';
+
+test('English feedback highlights the checked words and keeps an anchored repeated quote precise',()=>{
+  const source='We are getting ready. We may work longer and getting fewer results, without forgetting about tests. <em>Keep my draft.</em>';
+  const correction={kind:'error' as const,original:'work longer and getting fewer results',replacement:'work longer and get fewer results',explanation:'Use parallel verb forms.'};
+  const stored=JSON.parse(JSON.stringify(CorrectionPolicy.focusedCorrections([correction],source)));
+  const corrections=answerCorrections(source,stored);
+  assert.equal(corrections[0].original,'getting');
+  assert.deepEqual(corrections[0].ranges.map(r=>r.start),[source.lastIndexOf('getting fewer')]);
+  const html=renderCheckedText(source,corrections);
+  assert.match(html,/are getting ready/);
+  assert.match(html,/and <mark [^>]+>getting<\/mark> fewer/);
+  assert.match(html,/&lt;em&gt;Keep my draft/);
+  const legacy=answerCorrections(source,[{...correction,original:'getting',replacement:'get'}]);
+  assert.deepEqual(legacy[0].ranges.map(r=>r.start),[source.indexOf('getting'),source.indexOf('getting fewer')]);
+});
 test('Every lesson has English learning instructions and concrete vocabulary clues',()=>{for(const l of (Course as any).lessons){for(const text of [l.mission,l.title,l.reading.retell,l.grammar.title,l.grammar.explanation,l.speaking.retry,...l.writing.checklist])assert.ok(!/[\u0400-\u04ff]/.test(text));for(const w of l.vocabulary){const task=(L as any).wordTask(w);assert.ok(task.clue&&!/[\u0400-\u04ff]/.test(task.clue));assert.equal(task.answer,w.en);assert.ok(task.instruction.includes('ONE'));}}});
 test('The reported sentence gets precise local course corrections',()=>{const matches=Language.courseMatches('Our project help patient book appointment.');assert.equal(matches.length,3);assert.ok(matches.some((m:any)=>m.replacements.includes('helps')));assert.equal(Language.courseMatches('Our project helps patients book appointments.').length,0);assert.equal(Language.courseMatches('Does our project help patients book appointments?').length,0);});
 test('Open wording check is invalidated when text changes; no semantic mastery is invented',()=>{const c=new EnglishController(newEnglishDocument());c.start();const text='Our project helps the user book an appointment.';c.dispatch({type:'answer',key:'vocab-example',value:text});c.acceptLanguageCheck('vocab-example',{version:1,source:'local-rules',engine:'test',text,matches:[],checkedAt:new Date().toISOString(),reviewed:true,ignored:false});assert.equal(c.view().attempt!.results['vocab-example'].scope,'wording');assert.equal(c.view().attempt!.results['vocab-example'].assisted,true);c.dispatch({type:'answer',key:'vocab-example',value:'Changed text.'});assert.equal(c.view().attempt!.languageChecks?.['vocab-example'],undefined);assert.equal(c.view().attempt!.results['vocab-example'],undefined);});

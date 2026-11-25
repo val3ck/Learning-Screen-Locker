@@ -1,3 +1,5 @@
+import {clearCorrectionHighlights,mountCorrectionHighlights,showAnswerCorrection} from './correction-highlights';
+
 const escape=(v:unknown)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export function scoreTone(score:number){return score===100?'perfect':score>=80?'high':score>=50?'medium':'low';}
 const scorePatterns={
@@ -55,9 +57,11 @@ function tutorPreview(root:HTMLElement){const select=root.querySelector<HTMLSele
 export function focusTutorAnswer(root:HTMLElement,key:string,question?:string){const details=root.querySelector<HTMLDetailsElement>('.en-ai-tutor'),select=root.querySelector<HTMLSelectElement>('[data-en-hint-target]');if(!details||!select)return;details.open=true;if(question){const field=root.querySelector<HTMLTextAreaElement>('[data-en-hint-question]');if(field){field.value=question;sizeField(field);}}select.value=[...select.options].some(o=>o.value===key)?key:'';tutorPreview(root);details.scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});root.querySelector<HTMLTextAreaElement>('[data-en-hint-question]')?.focus({preventScroll:true});}
 export function enhanceEnglishAnswers(root:HTMLElement){
  for(const field of root.querySelectorAll<HTMLTextAreaElement>('textarea[data-en-autosize]'))sizeField(field);
+ mountCorrectionHighlights(root);
  showCelebrations(root);
  tutorPreview(root);
  if(boundRoots.has(root))return;boundRoots.add(root);
- root.addEventListener('input',event=>{const field=event.target;if(!(field instanceof HTMLTextAreaElement))return;if(field.matches('[data-en-autosize]'))sizeField(field);if(field.dataset.enAnswer){markAnswerEdited(root,field.dataset.enAnswer);const select=root.querySelector<HTMLSelectElement>('[data-en-hint-target]');if(select&&[...select.options].some(o=>o.value===field.dataset.enAnswer))select.value=field.dataset.enAnswer;tutorPreview(root);}});
+ root.addEventListener('click',showAnswerCorrection);
+ root.addEventListener('input',event=>{const field=event.target;if(!(field instanceof HTMLTextAreaElement))return;if(field.matches('[data-en-autosize]'))sizeField(field);if(field.dataset.enAnswer){clearCorrectionHighlights(field);markAnswerEdited(root,field.dataset.enAnswer);const select=root.querySelector<HTMLSelectElement>('[data-en-hint-target]');if(select&&[...select.options].some(o=>o.value===field.dataset.enAnswer))select.value=field.dataset.enAnswer;tutorPreview(root);}});
  root.addEventListener('change',event=>{if((event.target as HTMLElement)?.matches('[data-en-hint-target]'))tutorPreview(root);});
 }

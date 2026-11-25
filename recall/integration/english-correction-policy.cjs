@@ -7,6 +7,9 @@ function expanded(text){
 function focusCorrection(correction,source){
   let {original,replacement}=correction;
   if(typeof source!=='string'||!source.includes(original)||expanded(original)===expanded(replacement))return null;
+  const firstMatch=source.indexOf(original);
+  const quoteStart=Number.isInteger(correction.start)&&correction.start>=0&&source.startsWith(original,correction.start)
+    ?correction.start:source.indexOf(original,firstMatch+1)===-1?firstMatch:undefined;
   const before=[...original.matchAll(/\S+/g)],after=[...replacement.matchAll(/\S+/g)];
   let first=0,oldEnd=before.length,newEnd=after.length;
   while(first<oldEnd&&first<newEnd&&before[first][0]===after[first][0])first++;
@@ -21,11 +24,12 @@ function focusCorrection(correction,source){
   if(!original||oldEnd-first>5||newEnd-first>5||Math.max(original.length,replacement.length)>64)return null;
   if(expanded(original)===expanded(replacement))return null;
   // A short, wholly reworded sentence is still a rewrite.
-  const start=source.indexOf(original),end=start+original.length;
+  const anchor=quoteStart===undefined?undefined:quoteStart+before[first].index;
+  const start=anchor??source.indexOf(original),end=start+original.length;
   const isSentence=/(?:^|[.!?])\s*$/.test(source.slice(0,start))&&
     (/[.!?]$/.test(original)||/^\s*(?:[.!?](?:\s|$)|$)/.test(source.slice(end)));
   if(isSentence&&oldEnd-first>=3&&newEnd-first>=3)return null;
-  return {...correction,original,replacement};
+  return {...correction,original,replacement,start:anchor};
 }
 
 function localArticleIssues(text){
@@ -52,7 +56,7 @@ function focusedCorrections(corrections,source){
     if(local.some(issue=>issue.original.startsWith(result.original)||result.original.includes(issue.original)))return [];
     return [result];
   });
-  return [...local.map(({original,replacement,explanation,kind})=>({original,replacement,explanation,kind})),...focused]
+  return [...local,...focused]
     .filter(correction=>{
       const key=correction.original+'\n'+correction.replacement;
       if(seen.has(key))return false;
